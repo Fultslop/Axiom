@@ -1,0 +1,65 @@
+import typescript from 'typescript';
+
+export interface ContractTag {
+  kind: 'pre' | 'post';
+  expression: string;
+}
+
+const PRE_TAG = 'pre' as const;
+const POST_TAG = 'post' as const;
+const TYPE_STRING = 'string' as const;
+
+function isStringComment(
+  comment: typescript.JSDocTag['comment'],
+): comment is string {
+  // eslint-disable-next-line valid-typeof
+  return typeof comment === TYPE_STRING;
+}
+
+function resolveTagComment(comment: typescript.JSDocTag['comment']): string {
+  if (isStringComment(comment)) {
+    return comment.trim();
+  }
+  if (Array.isArray(comment)) {
+    const commentArray = comment as Array<{
+      text?: string;
+    }>;
+    const parts = commentArray.map((part) => {
+      if (part.text !== undefined) {
+        return part.text;
+      }
+      return '';
+    });
+    return parts.join('').trim();
+  }
+  return '';
+}
+
+function toContractKind(tagName: string): 'pre' | 'post' | undefined {
+  if (tagName === PRE_TAG) {
+    return PRE_TAG;
+  }
+  if (tagName === POST_TAG) {
+    return POST_TAG;
+  }
+  return undefined;
+}
+
+export function extractContractTags(
+  node: typescript.FunctionLikeDeclaration,
+): ContractTag[] {
+  const jsDocTags = typescript.getJSDocTags(node);
+  const result: ContractTag[] = [];
+
+  for (const tag of jsDocTags) {
+    const kind = toContractKind(tag.tagName.text.toLowerCase());
+    if (kind !== undefined) {
+      const expression = resolveTagComment(tag.comment);
+      if (expression.length > 0) {
+        result.push({ kind, expression });
+      }
+    }
+  }
+
+  return result;
+}
