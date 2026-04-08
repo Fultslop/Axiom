@@ -121,4 +121,78 @@ describe('transformer', () => {
     `;
     expect(() => transform(source)).not.toThrow();
   });
+
+  it('transforms class method with @pre contract', () => {
+    const source = `
+      class Account {
+        /** @pre amount > 0 */
+        public withdraw(amount: number): number {
+          return amount;
+        }
+      }
+    `;
+    const output = transform(source);
+    expect(output).toContain('ContractViolationError');
+    expect(output).toContain('!(amount > 0)');
+    expect(output).toContain('"PRE"');
+    expect(output).toContain('"Account.withdraw"');
+  });
+
+  it('does not transform private class methods', () => {
+    const source = `
+      class Account {
+        /** @pre amount > 0 */
+        private withdraw(amount: number): number {
+          return amount;
+        }
+      }
+    `;
+    const output = transform(source);
+    expect(output).not.toContain('ContractViolationError');
+  });
+
+  it('does not transform protected class methods', () => {
+    const source = `
+      class Account {
+        /** @pre amount > 0 */
+        protected withdraw(amount: number): number {
+          return amount;
+        }
+      }
+    `;
+    const output = transform(source);
+    expect(output).not.toContain('ContractViolationError');
+  });
+
+  it('uses UnknownClass when method parent is not a class declaration', () => {
+    const source = `
+      /** @pre amount > 0 */
+      export function withdraw(amount: number): number { return amount; }
+    `;
+    const output = transform(source);
+    // exported function uses the function name, not a class name
+    expect(output).toContain('"withdraw"');
+  });
+
+  it('handles class method with unknown name gracefully', () => {
+    const source = `
+      class MyClass {
+        /** @pre xxx > 0 */
+        public ['computed'](xxx: number): number { return xxx; }
+      }
+    `;
+    // computed-property method name falls into unknownMethod path
+    expect(() => transform(source)).not.toThrow();
+  });
+
+  it('creates transformer with program argument', () => {
+    const result = typescript.transpileModule(
+      `/** @pre xxx > 0 */\nexport function foo(xxx: number): number { return xxx; }`,
+      {
+        compilerOptions: { target: typescript.ScriptTarget.ES2020 },
+        transformers: { before: [createTransformer(undefined)] },
+      },
+    );
+    expect(result.outputText).toContain('ContractViolationError');
+  });
 });

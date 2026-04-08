@@ -61,3 +61,87 @@ describe('buildResultReturn', () => {
     expect(output).toContain('return result');
   });
 });
+
+describe('reifyExpression — extended literal/keyword coverage', () => {
+  it('handles string literal in expression', () => {
+    const node = buildPreCheck('"hello" === xxx', 'Test.method');
+    const output = printNode(node);
+    expect(output).toContain('"hello"');
+  });
+
+  it('handles null keyword in expression', () => {
+    const node = buildPreCheck('xxx !== null', 'Test.method');
+    const output = printNode(node);
+    expect(output).toContain('null');
+  });
+
+  it('handles true keyword in expression', () => {
+    const node = buildPreCheck('xxx === true', 'Test.method');
+    const output = printNode(node);
+    expect(output).toContain('true');
+  });
+
+  it('handles false keyword in expression', () => {
+    const node = buildPreCheck('xxx === false', 'Test.method');
+    const output = printNode(node);
+    expect(output).toContain('false');
+  });
+
+  it('handles property access in expression', () => {
+    const node = buildPreCheck('obj.balance > 0', 'Account.withdraw');
+    const output = printNode(node);
+    expect(output).toContain('obj.balance');
+  });
+
+  it('handles typeof in expression', () => {
+    const node = buildPreCheck('typeof xxx === "string"', 'Test.method');
+    const output = printNode(node);
+    expect(output).toContain('typeof');
+  });
+
+  it('handles parenthesized expression', () => {
+    const node = buildPreCheck('(xxx > 0)', 'Test.method');
+    const output = printNode(node);
+    expect(output).toContain('xxx > 0');
+  });
+
+  it('handles prefix unary expression', () => {
+    const node = buildPreCheck('!xxx', 'Test.method');
+    const output = printNode(node);
+    expect(output).toContain('!xxx');
+  });
+});
+
+describe('reifyStatement — extended statement coverage', () => {
+  it('handles variable declaration in body capture', () => {
+    const block = parseStatement('{ const yyy = 5; return yyy; }') as typescript.Block;
+    const node = buildBodyCapture(block.statements);
+    const output = printNode(node);
+    expect(output).toContain('const yyy');
+    expect(output).toContain('return yyy');
+  });
+
+  it('handles if statement in body capture', () => {
+    const block = parseStatement('{ if (xxx > 0) { return xxx; } return 0; }') as typescript.Block;
+    const node = buildBodyCapture(block.statements);
+    const output = printNode(node);
+    expect(output).toContain('if');
+    expect(output).toContain('xxx > 0');
+  });
+
+  it('handles if statement with else in body capture', () => {
+    const block = parseStatement(
+      '{ if (xxx > 0) { return xxx; } else { return 0; } }',
+    ) as typescript.Block;
+    const node = buildBodyCapture(block.statements);
+    const output = printNode(node);
+    expect(output).toContain('else');
+  });
+
+  it('handles return statement without expression in body capture', () => {
+    const block = parseStatement('{ if (xxx > 0) { return; } return 0; }') as typescript.Block;
+    const node = buildBodyCapture(block.statements);
+    const output = printNode(node);
+    expect(output).toContain('return;');
+  });
+});

@@ -17,7 +17,7 @@ const airbnbEs6 = require("eslint-config-airbnb-base/rules/es6");
 
 export default [
   {
-    ignores: ["dist/**", "node_modules/**", "eslint.config.mjs", "jest.config.ts"],
+    ignores: ["dist/**", "node_modules/**", "coverage/**", "eslint.config.mjs", "jest.config.ts"],
   },
   {
     files: ["src/**/*.ts"],
@@ -47,7 +47,7 @@ export default [
 
 
       // Your Specific Overrides
-      "@typescript-eslint/no-unused-vars": "error",
+      "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
       "@typescript-eslint/explicit-function-return-type": "warn",
       "@typescript-eslint/no-explicit-any": "error",
       "@typescript-eslint/consistent-type-imports": "error",

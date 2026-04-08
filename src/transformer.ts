@@ -176,8 +176,7 @@ function visitNode(
 // ts-patch plugin entry point. program is optional so the transformer can
 // also be used in transpileModule() for unit testing.
 export default function createTransformer(
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  program?: typescript.Program,
+  _program?: typescript.Program,
 ): typescript.TransformerFactory<typescript.SourceFile> {
   return (context: typescript.TransformationContext) =>
     (sourceFile: typescript.SourceFile): typescript.SourceFile => {

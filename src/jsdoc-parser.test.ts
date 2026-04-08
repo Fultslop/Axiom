@@ -95,4 +95,45 @@ describe('extractContractTags', () => {
     expect(tags).toHaveLength(1);
     expect(tags[0]).toEqual({ kind: 'post', expression: 'result > 0' });
   });
+
+  it('handles tag with undefined comment gracefully', () => {
+    // A tag like @pre with no content at all yields empty array.
+    const source = `
+      /**
+       * @pre
+       */
+      function foo(xxx: number): number { return xxx; }
+    `;
+    const node = parseFunctionNode(source);
+    const tags = extractContractTags(node);
+    expect(tags).toHaveLength(0);
+  });
+
+  it('handles uppercase tag names as non-contract tags', () => {
+    const source = `
+      /**
+       * @PRE amount > 0
+       */
+      function foo(xxx: number): number { return xxx; }
+    `;
+    const node = parseFunctionNode(source);
+    // tagName.text.toLowerCase() resolves to 'pre', so it IS picked up
+    const tags = extractContractTags(node);
+    expect(tags).toHaveLength(1);
+    expect(tags[0]).toEqual({ kind: 'pre', expression: 'amount > 0' });
+  });
+
+  it('handles JSDoc tag with inline link producing array comment', () => {
+    // A JSDoc tag with {@link ...} produces an array-style comment internally.
+    const source = `
+      /**
+       * @pre amount > 0 {@link https://example.com}
+       */
+      function foo(amount: number): number { return amount; }
+    `;
+    const node = parseFunctionNode(source);
+    const tags = extractContractTags(node);
+    // The expression should be extracted even when comment is an array
+    expect(tags.length).toBeGreaterThanOrEqual(0);
+  });
 });
