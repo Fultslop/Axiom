@@ -290,6 +290,20 @@ function reifyStatement(
   throw new Error(`Unsupported statement node kind: ${typescript.SyntaxKind[node.kind]}`);
 }
 
+export function parseContractExpression(expression: string): typescript.Expression {
+  const tempSourceFile = typescript.createSourceFile(
+    'expr.ts',
+    expression,
+    typescript.ScriptTarget.ES2020,
+    true,
+  );
+  const stmt = tempSourceFile.statements[0];
+  if (!stmt || !typescript.isExpressionStatement(stmt)) {
+    throw new Error(`Failed to parse contract expression: ${expression}`);
+  }
+  return stmt.expression;
+}
+
 function buildThrowContractViolation(
   factory: typescript.NodeFactory,
   contractType: 'PRE' | 'POST',

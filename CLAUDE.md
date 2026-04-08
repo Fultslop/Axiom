@@ -59,6 +59,7 @@ registry=http://localhost:4873
 - All source in `src/`, tests co-located as `*.test.ts` or `*.spec.ts`
 - `prepublishOnly` runs typecheck + lint + tests + build — do not skip it
 - 80% coverage threshold enforced by Jest
+- Do not use `console` — it is not declared in the ESLint globals. For transformer warnings use an injectable `warn` callback (`options?: { warn?: (msg: string) => void }`), defaulting to `process.stderr.write` (the right default for a ts-patch plugin). Pass the spy directly in tests rather than patching `console`. `process` is declared as a global in the ESLint config.
 
 ## Publishing
 

@@ -27,6 +27,9 @@ export default [
         project: "./tsconfig.json",
         tsconfigRootDir: import.meta.dirname,
       },
+      globals: {
+        process: "readonly",
+      },
     },
     plugins: {
       "@typescript-eslint": tseslint,

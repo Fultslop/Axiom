@@ -1,5 +1,5 @@
 import typescript from 'typescript';
-import { buildPreCheck, buildBodyCapture, buildPostCheck, buildResultReturn } from '@src/ast-builder';
+import { buildPreCheck, buildBodyCapture, buildPostCheck, buildResultReturn, parseContractExpression } from '@src/ast-builder';
 
 function printNode(node: typescript.Node): string {
   const printer = typescript.createPrinter({ newLine: typescript.NewLineKind.LineFeed });
@@ -189,6 +189,22 @@ describe('reifyStatement — extended statement coverage', () => {
     const output = printNode(node);
     expect(output).toContain('continue');
     expect(output).toContain('break');
+  });
+});
+
+describe('parseContractExpression', () => {
+  it('returns a BinaryExpression node for a comparison', () => {
+    const node = parseContractExpression('amount > 0');
+    expect(typescript.isBinaryExpression(node)).toBe(true);
+  });
+
+  it('returns a PrefixUnaryExpression for a negation', () => {
+    const node = parseContractExpression('!flag');
+    expect(typescript.isPrefixUnaryExpression(node)).toBe(true);
+  });
+
+  it('throws for an empty string', () => {
+    expect(() => parseContractExpression('')).toThrow();
   });
 });
 
