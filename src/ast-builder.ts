@@ -31,6 +31,9 @@ function reifyLiteralOrKeyword(
   if (node.kind === typescript.SyntaxKind.FalseKeyword) {
     return factory.createFalse();
   }
+  if (node.kind === typescript.SyntaxKind.ThisKeyword) {
+    return factory.createThis();
+  }
   return undefined;
 }
 

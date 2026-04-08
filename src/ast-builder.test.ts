@@ -145,3 +145,14 @@ describe('reifyStatement — extended statement coverage', () => {
     expect(output).toContain('return;');
   });
 });
+
+describe('buildBodyCapture with this keyword', () => {
+  it('handles this.property in body capture', () => {
+    const src = '{ this.balance -= amount; return this.balance; }';
+    const block = parseStatement(src) as typescript.Block;
+    const node = buildBodyCapture(block.statements);
+    const output = printNode(node);
+    expect(output).toContain('this.balance');
+    expect(output).toContain('const result');
+  });
+});
