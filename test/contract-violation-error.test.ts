@@ -1,4 +1,4 @@
-import { ContractViolationError } from './contract-violation-error';
+import { ContractViolationError } from '@src/contract-violation-error';
 
 describe('ContractViolationError', () => {
   it('sets type, expression, and location', () => {

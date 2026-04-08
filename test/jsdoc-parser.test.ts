@@ -1,5 +1,5 @@
 import typescript from 'typescript';
-import { extractContractTags } from './jsdoc-parser';
+import { extractContractTags } from '@src/jsdoc-parser';
 
 function parseFunctionNode(source: string): typescript.FunctionLikeDeclaration {
   const sourceFile = typescript.createSourceFile(

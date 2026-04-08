@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"const ts = require\\('typescript'\\); console.log\\(ts.version\\); console.log\\(Object.keys\\(ts\\).filter\\(k => k.toLowerCase\\(\\).includes\\('clone'\\)\\)\\)\")",
+      "Bash(node -e ':*)",
+      "Bash(ls /c/Users/lassc/Code/typescript/fsprepost/node_modules/typescript/lib/*.d.ts)",
+      "Bash(ls /c/Users/lassc/Code/typescript/fsprepost/node_modules/typescript/lib/typescript*)",
+      "Bash(node -e \"const ts = require\\('typescript'\\); const f = ts.factory; console.log\\(f.createImportClause.toString\\(\\).slice\\(0, 200\\)\\)\")",
+      "Bash(node -e \"const ts = require\\('typescript'\\); const f = ts.factory; console.log\\(f.createImportClause.length\\); console.log\\(f.createImportClause.toString\\(\\).slice\\(0,600\\)\\)\")",
+      "Bash(node -e \"const ts = require\\('typescript'\\); const f = ts.factory; const clause = f.createImportClause\\(undefined, undefined, f.createNamedImports\\([f.createImportSpecifier\\(false, undefined, f.createIdentifier\\('ContractViolationError'\\)\\)]\\)\\); console.log\\('isTypeOnly:', clause.isTypeOnly, 'phaseModifier:', clause.phaseModifier\\)\")",
+      "Bash(npm version:*)",
+      "Bash(npm publish:*)"
+    ]
+  }
+}

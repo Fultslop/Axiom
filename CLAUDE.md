@@ -59,3 +59,7 @@ registry=http://localhost:4873
 - All source in `src/`, tests co-located as `*.test.ts` or `*.spec.ts`
 - `prepublishOnly` runs typecheck + lint + tests + build — do not skip it
 - 80% coverage threshold enforced by Jest
+
+## Publishing
+
+We're currently doing acceptance testing in another project. When a new feature/fix is completed update the version and upload it to the local verdaccio on localhost:4873.

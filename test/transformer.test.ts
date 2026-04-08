@@ -1,5 +1,5 @@
 import typescript from 'typescript';
-import createTransformer from './transformer';
+import createTransformer from '@src/transformer';
 
 function transform(source: string): string {
   const result = typescript.transpileModule(source, {
@@ -183,6 +183,44 @@ describe('transformer', () => {
     `;
     // computed-property method name falls into unknownMethod path
     expect(() => transform(source)).not.toThrow();
+  });
+
+  it('injects post-check for function body containing a switch statement', () => {
+    const source = `
+      /**
+       * @post result === "bar"
+       */
+      export function doSwitchFn(value: string): string {
+        switch (value) {
+          case "foo": return "bar";
+          case "bar": return "baz";
+          default: return "qaz";
+        }
+      }
+    `;
+    const output = transform(source);
+    expect(output).toContain('const result');
+    expect(output).toContain('!(result === "bar")');
+    expect(output).toContain('"POST"');
+    expect(output).toContain('return result');
+  });
+
+  it('injects post-check for function body containing a for-of loop', () => {
+    const source = `
+      /**
+       * @post result > 0
+       */
+      export function doLoopFn(arr: number[]): number {
+        let sum = 0;
+        for (const x of arr) { sum += x; }
+        return sum;
+      }
+    `;
+    const output = transform(source);
+    expect(output).toContain('const result');
+    expect(output).toContain('!(result > 0)');
+    expect(output).toContain('"POST"');
+    expect(output).toContain('return result');
   });
 
   it('creates transformer with program argument', () => {

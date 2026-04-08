@@ -1,7 +1,5 @@
 import typescript from 'typescript';
 
-const { factory } = typescript;
-
 const PRE_CONTRACT = 'PRE' as const;
 const POST_CONTRACT = 'POST' as const;
 
@@ -11,6 +9,7 @@ const POST_CONTRACT = 'POST' as const;
  * keyword or literal handled here.
  */
 function reifyLiteralOrKeyword(
+  factory: typescript.NodeFactory,
   node: typescript.Expression,
 ): typescript.Expression | undefined {
   if (typescript.isIdentifier(node)) {
@@ -37,6 +36,36 @@ function reifyLiteralOrKeyword(
   return undefined;
 }
 
+/* eslint-disable @typescript-eslint/no-use-before-define */
+function reifyCompositeExpression(
+  factory: typescript.NodeFactory,
+  node: typescript.Expression,
+): typescript.Expression | undefined {
+  if (typescript.isConditionalExpression(node)) {
+    return factory.createConditionalExpression(
+      reifyExpression(factory, node.condition),
+      factory.createToken(typescript.SyntaxKind.QuestionToken),
+      reifyExpression(factory, node.whenTrue),
+      factory.createToken(typescript.SyntaxKind.ColonToken),
+      reifyExpression(factory, node.whenFalse),
+    );
+  }
+  if (typescript.isCallExpression(node)) {
+    return factory.createCallExpression(
+      reifyExpression(factory, node.expression),
+      undefined,
+      Array.from(node.arguments).map((arg) => reifyExpression(factory, arg)),
+    );
+  }
+  if (typescript.isElementAccessExpression(node)) {
+    return factory.createElementAccessExpression(
+      reifyExpression(factory, node.expression),
+      reifyExpression(factory, node.argumentExpression),
+    );
+  }
+  return undefined;
+}
+
 /**
  * Rebuilds an expression node entirely using factory calls, producing a fully
  * synthesized AST (no source-file text positions) so the printer can emit it
@@ -45,57 +74,171 @@ function reifyLiteralOrKeyword(
  * Supports the subset of expression node types that appear in typical
  * design-by-contract assertions.
  */
-function reifyExpression(node: typescript.Expression): typescript.Expression {
-  const literalResult = reifyLiteralOrKeyword(node);
+function reifyExpression(
+  factory: typescript.NodeFactory,
+  node: typescript.Expression,
+): typescript.Expression {
+  const literalResult = reifyLiteralOrKeyword(factory, node);
   if (literalResult !== undefined) {
     return literalResult;
   }
 
   if (typescript.isBinaryExpression(node)) {
     return factory.createBinaryExpression(
-      reifyExpression(node.left),
+      reifyExpression(factory, node.left),
       node.operatorToken.kind,
-      reifyExpression(node.right),
+      reifyExpression(factory, node.right),
     );
   }
 
   if (typescript.isPrefixUnaryExpression(node)) {
     return factory.createPrefixUnaryExpression(
       node.operator,
-      reifyExpression(node.operand),
+      reifyExpression(factory, node.operand),
+    );
+  }
+
+  if (typescript.isPostfixUnaryExpression(node)) {
+    return factory.createPostfixUnaryExpression(
+      reifyExpression(factory, node.operand),
+      node.operator,
     );
   }
 
   if (typescript.isParenthesizedExpression(node)) {
-    return factory.createParenthesizedExpression(reifyExpression(node.expression));
+    return factory.createParenthesizedExpression(reifyExpression(factory, node.expression));
   }
 
   if (typescript.isPropertyAccessExpression(node)) {
     return factory.createPropertyAccessExpression(
-      reifyExpression(node.expression),
+      reifyExpression(factory, node.expression),
       factory.createIdentifier(node.name.text),
     );
   }
 
   if (typescript.isTypeOfExpression(node)) {
-    return factory.createTypeOfExpression(reifyExpression(node.expression));
+    return factory.createTypeOfExpression(reifyExpression(factory, node.expression));
+  }
+
+  const compositeResult = reifyCompositeExpression(factory, node);
+  if (compositeResult !== undefined) {
+    return compositeResult;
   }
 
   throw new Error(`Unsupported expression node kind: ${typescript.SyntaxKind[node.kind]}`);
 }
 
+function reifyForInitializer(
+  factory: typescript.NodeFactory,
+  node: typescript.ForInitializer,
+): typescript.ForInitializer {
+  if (typescript.isVariableDeclarationList(node)) {
+    return factory.createVariableDeclarationList(
+      Array.from(node.declarations).map((decl) =>
+        factory.createVariableDeclaration(
+          typescript.isIdentifier(decl.name)
+            ? factory.createIdentifier(decl.name.text)
+            : decl.name,
+          undefined,
+          undefined,
+          decl.initializer ? reifyExpression(factory, decl.initializer) : undefined,
+        ),
+      ),
+      node.flags,
+    );
+  }
+  return reifyExpression(factory, node);
+}
+
+function reifyIfStatement(
+  factory: typescript.NodeFactory,
+  node: typescript.IfStatement,
+): typescript.IfStatement {
+  return factory.createIfStatement(
+    reifyExpression(factory, node.expression),
+    reifyStatement(factory, node.thenStatement),
+    node.elseStatement !== undefined ? reifyStatement(factory, node.elseStatement) : undefined,
+  );
+}
+
+function reifyLoopStatement(
+  factory: typescript.NodeFactory,
+  node: typescript.Statement,
+): typescript.Statement | undefined {
+  if (typescript.isForOfStatement(node)) {
+    return factory.createForOfStatement(
+      node.awaitModifier,
+      reifyForInitializer(factory, node.initializer),
+      reifyExpression(factory, node.expression),
+      reifyStatement(factory, node.statement),
+    );
+  }
+  if (typescript.isForInStatement(node)) {
+    return factory.createForInStatement(
+      reifyForInitializer(factory, node.initializer),
+      reifyExpression(factory, node.expression),
+      reifyStatement(factory, node.statement),
+    );
+  }
+  if (typescript.isForStatement(node)) {
+    return factory.createForStatement(
+      node.initializer ? reifyForInitializer(factory, node.initializer) : undefined,
+      node.condition ? reifyExpression(factory, node.condition) : undefined,
+      node.incrementor ? reifyExpression(factory, node.incrementor) : undefined,
+      reifyStatement(factory, node.statement),
+    );
+  }
+  if (typescript.isWhileStatement(node)) {
+    return factory.createWhileStatement(
+      reifyExpression(factory, node.expression),
+      reifyStatement(factory, node.statement),
+    );
+  }
+  if (typescript.isDoStatement(node)) {
+    return factory.createDoStatement(
+      reifyStatement(factory, node.statement),
+      reifyExpression(factory, node.expression),
+    );
+  }
+  if (typescript.isSwitchStatement(node)) {
+    return factory.createSwitchStatement(
+      reifyExpression(factory, node.expression),
+      factory.createCaseBlock(
+        Array.from(node.caseBlock.clauses).map((clause) => reifyCaseClause(factory, clause)),
+      ),
+    );
+  }
+  return undefined;
+}
+
+function reifyCaseClause(
+  factory: typescript.NodeFactory,
+  clause: typescript.CaseOrDefaultClause,
+): typescript.CaseOrDefaultClause {
+  const stmts = Array.from(clause.statements).map((stmt) => reifyStatement(factory, stmt));
+  if (typescript.isCaseClause(clause)) {
+    return factory.createCaseClause(reifyExpression(factory, clause.expression), stmts);
+  }
+  return factory.createDefaultClause(stmts);
+}
+
+/* eslint-enable @typescript-eslint/no-use-before-define */
+
 /**
  * Rebuilds a statement node using factory calls, producing a fully synthesized
  * AST for printing against any SourceFile.
  */
-function reifyStatement(node: typescript.Statement): typescript.Statement {
+function reifyStatement(
+  factory: typescript.NodeFactory,
+  node: typescript.Statement,
+): typescript.Statement {
   if (typescript.isExpressionStatement(node)) {
-    return factory.createExpressionStatement(reifyExpression(node.expression));
+    return factory.createExpressionStatement(reifyExpression(factory, node.expression));
   }
 
   if (typescript.isReturnStatement(node)) {
     return factory.createReturnStatement(
-      node.expression !== undefined ? reifyExpression(node.expression) : undefined,
+      node.expression !== undefined ? reifyExpression(factory, node.expression) : undefined,
     );
   }
 
@@ -111,7 +254,7 @@ function reifyStatement(node: typescript.Statement): typescript.Statement {
             undefined,
             undefined,
             decl.initializer !== undefined
-              ? reifyExpression(decl.initializer)
+              ? reifyExpression(factory, decl.initializer)
               : undefined,
           ),
         ),
@@ -121,23 +264,34 @@ function reifyStatement(node: typescript.Statement): typescript.Statement {
   }
 
   if (typescript.isIfStatement(node)) {
-    return factory.createIfStatement(
-      reifyExpression(node.expression),
-      reifyStatement(node.thenStatement),
-      node.elseStatement !== undefined
-        ? reifyStatement(node.elseStatement)
-        : undefined,
-    );
+    return reifyIfStatement(factory, node);
   }
 
   if (typescript.isBlock(node)) {
-    return factory.createBlock(Array.from(node.statements).map(reifyStatement), true);
+    return factory.createBlock(
+      Array.from(node.statements).map((stmt) => reifyStatement(factory, stmt)),
+      true,
+    );
+  }
+
+  if (typescript.isBreakStatement(node)) {
+    return factory.createBreakStatement(node.label);
+  }
+
+  if (typescript.isContinueStatement(node)) {
+    return factory.createContinueStatement(node.label);
+  }
+
+  const loopResult = reifyLoopStatement(factory, node);
+  if (loopResult !== undefined) {
+    return loopResult;
   }
 
   throw new Error(`Unsupported statement node kind: ${typescript.SyntaxKind[node.kind]}`);
 }
 
 function buildThrowContractViolation(
+  factory: typescript.NodeFactory,
   contractType: 'PRE' | 'POST',
   expression: string,
   location: string,
@@ -156,6 +310,7 @@ function buildThrowContractViolation(
 }
 
 function buildGuardIf(
+  factory: typescript.NodeFactory,
   expression: string,
   body: typescript.ThrowStatement,
 ): typescript.IfStatement {
@@ -172,29 +327,42 @@ function buildGuardIf(
     throw new Error(`Failed to parse contract expression: ${expression}`);
   }
 
-  const synthesizedCondition = reifyExpression(parsedCondition.expression);
+  const synthesizedCondition = reifyExpression(factory, parsedCondition.expression);
 
   return factory.createIfStatement(synthesizedCondition, body);
 }
 
-export function buildPreCheck(expression: string, location: string): typescript.IfStatement {
+export function buildPreCheck(
+  expression: string,
+  location: string,
+  factory: typescript.NodeFactory = typescript.factory,
+): typescript.IfStatement {
   return buildGuardIf(
+    factory,
     expression,
-    buildThrowContractViolation(PRE_CONTRACT, expression, location),
+    buildThrowContractViolation(factory, PRE_CONTRACT, expression, location),
   );
 }
 
-export function buildPostCheck(expression: string, location: string): typescript.IfStatement {
+export function buildPostCheck(
+  expression: string,
+  location: string,
+  factory: typescript.NodeFactory = typescript.factory,
+): typescript.IfStatement {
   return buildGuardIf(
+    factory,
     expression,
-    buildThrowContractViolation(POST_CONTRACT, expression, location),
+    buildThrowContractViolation(factory, POST_CONTRACT, expression, location),
   );
 }
 
 export function buildBodyCapture(
   originalStatements: typescript.NodeArray<typescript.Statement>,
+  factory: typescript.NodeFactory = typescript.factory,
 ): typescript.VariableStatement {
-  const reifiedStatements = Array.from(originalStatements).map(reifyStatement);
+  const reifiedStatements = Array.from(originalStatements).map(
+    (stmt) => reifyStatement(factory, stmt),
+  );
 
   const iife = factory.createCallExpression(
     factory.createArrowFunction(
@@ -223,6 +391,8 @@ export function buildBodyCapture(
   );
 }
 
-export function buildResultReturn(): typescript.ReturnStatement {
+export function buildResultReturn(
+  factory: typescript.NodeFactory = typescript.factory,
+): typescript.ReturnStatement {
   return factory.createReturnStatement(factory.createIdentifier('result'));
 }

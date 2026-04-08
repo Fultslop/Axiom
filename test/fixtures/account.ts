@@ -1,4 +1,4 @@
-import { ContractViolationError } from 'fsprepost';
+import { ContractViolationError } from '@src/contract-violation-error';
 
 // ContractViolationError is imported here only to satisfy the type-checker
 // when running this file directly. The transformer will inject its own import.

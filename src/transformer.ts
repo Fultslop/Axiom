@@ -3,8 +3,6 @@ import { extractContractTags } from './jsdoc-parser';
 import { buildPreCheck, buildBodyCapture, buildPostCheck, buildResultReturn } from './ast-builder';
 import type { ContractTag } from './jsdoc-parser';
 
-const { factory } = typescript;
-
 const KIND_PRE = 'pre' as const;
 const KIND_POST = 'post' as const;
 
@@ -45,6 +43,7 @@ function buildLocationName(node: typescript.FunctionLikeDeclaration): string {
 }
 
 function buildGuardedStatements(
+  factory: typescript.NodeFactory,
   preTags: ContractTag[],
   postTags: ContractTag[],
   originalBody: typescript.Block,
@@ -53,15 +52,15 @@ function buildGuardedStatements(
   const statements: typescript.Statement[] = [];
 
   for (const tag of preTags) {
-    statements.push(buildPreCheck(tag.expression, location));
+    statements.push(buildPreCheck(tag.expression, location, factory));
   }
 
   if (postTags.length > 0) {
-    statements.push(buildBodyCapture(originalBody.statements));
+    statements.push(buildBodyCapture(originalBody.statements, factory));
     for (const tag of postTags) {
-      statements.push(buildPostCheck(tag.expression, location));
+      statements.push(buildPostCheck(tag.expression, location, factory));
     }
-    statements.push(buildResultReturn());
+    statements.push(buildResultReturn(factory));
   } else {
     statements.push(...Array.from(originalBody.statements));
   }
@@ -69,37 +68,86 @@ function buildGuardedStatements(
   return statements;
 }
 
-function buildImportDeclaration(): typescript.ImportDeclaration {
-  return factory.createImportDeclaration(
+function buildRequireStatement(
+  factory: typescript.NodeFactory,
+): typescript.VariableStatement {
+  // Inject as a require() call rather than an import declaration so TypeScript's
+  // CJS emit cannot elide it (import elision skips imports with no parse-time
+  // value usage; synthetic usages added in a before-transformer are invisible).
+  return factory.createVariableStatement(
     undefined,
-    factory.createImportClause(
-      false,
-      undefined,
-      factory.createNamedImports([
-        factory.createImportSpecifier(
-          false,
+    factory.createVariableDeclarationList(
+      [factory.createVariableDeclaration(
+        factory.createObjectBindingPattern([
+          factory.createBindingElement(
+            undefined,
+            undefined,
+            factory.createIdentifier('ContractViolationError'),
+          ),
+        ]),
+        undefined,
+        undefined,
+        factory.createCallExpression(
+          factory.createIdentifier('require'),
           undefined,
-          factory.createIdentifier('ContractViolationError'),
+          [factory.createStringLiteral('fsprepost')],
         ),
-      ]),
+      )],
+      typescript.NodeFlags.Const,
     ),
-    factory.createStringLiteral('fsprepost'),
   );
 }
 
+/**
+ * Re-parse the source file with setParentNodes:true so JSDoc nodes are
+ * attached. Returns a map from source position to reparsed node.
+ */
+function buildReparsedIndex(
+  sourceFile: typescript.SourceFile,
+): Map<number, typescript.FunctionLikeDeclaration> {
+  const reparsed = typescript.createSourceFile(
+    sourceFile.fileName,
+    sourceFile.text,
+    sourceFile.languageVersion,
+    /* setParentNodes */ true,
+  );
+
+  const index = new Map<number, typescript.FunctionLikeDeclaration>();
+
+  function visit(node: typescript.Node): void {
+    if (typescript.isFunctionLike(node)) {
+      index.set(node.pos, node as typescript.FunctionLikeDeclaration);
+    }
+    typescript.forEachChild(node, visit);
+  }
+
+  visit(reparsed);
+  return index;
+}
+
 function rewriteFunction(
+  factory: typescript.NodeFactory,
   node: typescript.FunctionLikeDeclaration,
+  reparsedIndex: Map<number, typescript.FunctionLikeDeclaration>,
 ): typescript.FunctionLikeDeclaration | null {
   const originalBody = node.body;
   if (!originalBody || !typescript.isBlock(originalBody)) {
     return null;
   }
 
-  const tags = extractContractTags(node);
+  // Use the reparsed counterpart so getJSDocTags works correctly.
+  const reparsedNode = reparsedIndex.get(node.pos) ?? node;
+  const tags = extractContractTags(reparsedNode);
+  if (tags.length === 0) {
+    return null;
+  }
+
   const preTags = tags.filter((tag) => tag.kind === KIND_PRE);
   const postTags = tags.filter((tag) => tag.kind === KIND_POST);
   const location = buildLocationName(node);
-  const newStatements = buildGuardedStatements(preTags, postTags, originalBody, location);
+  const newStatements = buildGuardedStatements(
+    factory, preTags, postTags, originalBody, location,
+  );
   const newBody = factory.createBlock(newStatements, true);
 
   if (typescript.isMethodDeclaration(node)) {
@@ -133,42 +181,45 @@ function rewriteFunction(
 }
 
 function tryRewriteFunction(
+  factory: typescript.NodeFactory,
   node: typescript.FunctionLikeDeclaration,
+  reparsedIndex: Map<number, typescript.FunctionLikeDeclaration>,
   transformed: { value: boolean },
 ): typescript.FunctionLikeDeclaration {
   try {
-    const tags = extractContractTags(node);
-    if (tags.length === 0) {
-      return node;
-    }
-    const rewritten = rewriteFunction(node);
+    const rewritten = rewriteFunction(factory, node, reparsedIndex);
     if (rewritten === null) {
       return node;
     }
     transformed.value = true;
     return rewritten;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  } catch (err) {
+  } catch {
     // Safety invariant: on any error, return original node unmodified.
-    // In a full ts-patch context with a Program, emit a diagnostic warning here.
     return node;
   }
 }
 
 function visitNode(
+  factory: typescript.NodeFactory,
   node: typescript.Node,
   context: typescript.TransformationContext,
+  reparsedIndex: Map<number, typescript.FunctionLikeDeclaration>,
   transformed: { value: boolean },
 ): typescript.Node {
   if (
     (typescript.isMethodDeclaration(node) || typescript.isFunctionDeclaration(node)) &&
     isPublicTarget(node as typescript.FunctionLikeDeclaration)
   ) {
-    return tryRewriteFunction(node as typescript.FunctionLikeDeclaration, transformed);
+    return tryRewriteFunction(
+      factory,
+      node as typescript.FunctionLikeDeclaration,
+      reparsedIndex,
+      transformed,
+    );
   }
   return typescript.visitEachChild(
     node,
-    (child) => visitNode(child, context, transformed),
+    (child) => visitNode(factory, child, context, reparsedIndex, transformed),
     context,
   );
 }
@@ -178,12 +229,17 @@ function visitNode(
 export default function createTransformer(
   _program?: typescript.Program,
 ): typescript.TransformerFactory<typescript.SourceFile> {
-  return (context: typescript.TransformationContext) =>
-    (sourceFile: typescript.SourceFile): typescript.SourceFile => {
+  return (context: typescript.TransformationContext) => {
+    // Use the compiler's own factory so synthesized nodes are compatible
+    // with the AST nodes created by the host TypeScript instance.
+    const { factory } = context;
+
+    return (sourceFile: typescript.SourceFile): typescript.SourceFile => {
+      const reparsedIndex = buildReparsedIndex(sourceFile);
       const transformed = { value: false };
       const visited = typescript.visitEachChild(
         sourceFile,
-        (node) => visitNode(node, context, transformed),
+        (node) => visitNode(factory, node, context, reparsedIndex, transformed),
         context,
       );
 
@@ -191,7 +247,11 @@ export default function createTransformer(
         return visited;
       }
 
-      const importDecl = buildImportDeclaration();
+      const importDecl = buildRequireStatement(factory);
       return factory.updateSourceFile(visited, [importDecl, ...Array.from(visited.statements)]);
     };
+  };
 }
+
+// Named export required by ts-jest's astTransformers pipeline.
+export { createTransformer as factory };
