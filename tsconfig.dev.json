@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "plugins": [{ "transform": "./src/transformer.ts", "type": "raw" }]
+  }
+}
