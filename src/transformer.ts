@@ -8,54 +8,11 @@ import { validateExpression } from './contract-validator';
 import type { ContractTag } from './jsdoc-parser';
 import type { SimpleType } from './contract-validator';
 import { buildReparsedIndex, type ReparsedIndex } from './reparsed-index';
+import { isPublicTarget, buildLocationName, buildKnownIdentifiers } from './node-helpers';
 
 const KIND_PRE = 'pre' as const;
 const KIND_POST = 'post' as const;
 const CHECK_INVARIANTS_NAME = '#checkInvariants' as const;
-
-// ---------------------------------------------------------------------------
-// Visibility helpers
-// ---------------------------------------------------------------------------
-
-function isPublicTarget(node: typescript.FunctionLikeDeclaration): boolean {
-  const modifiers = typescript.canHaveModifiers(node)
-    ? typescript.getModifiers(node) ?? []
-    : [];
-
-  const isPrivateOrProtected = modifiers.some(
-    (mod) =>
-      mod.kind === typescript.SyntaxKind.PrivateKeyword ||
-      mod.kind === typescript.SyntaxKind.ProtectedKeyword,
-  );
-
-  const isExportedFunction =
-    typescript.isFunctionDeclaration(node) &&
-    modifiers.some((mod) => mod.kind === typescript.SyntaxKind.ExportKeyword);
-
-  const isPublicMethod = typescript.isMethodDeclaration(node) && !isPrivateOrProtected;
-
-  return isExportedFunction || isPublicMethod;
-}
-
-// ---------------------------------------------------------------------------
-// Name helpers
-// ---------------------------------------------------------------------------
-
-function buildLocationName(node: typescript.FunctionLikeDeclaration): string {
-  if (typescript.isMethodDeclaration(node)) {
-    const className =
-      typescript.isClassDeclaration(node.parent) && node.parent.name
-        ? node.parent.name.text
-        : 'UnknownClass';
-    const methodName =
-      typescript.isIdentifier(node.name) ? node.name.text : 'unknownMethod';
-    return `${className}.${methodName}`;
-  }
-  if (typescript.isFunctionDeclaration(node) && node.name) {
-    return node.name.text;
-  }
-  return 'anonymous';
-}
 
 // ---------------------------------------------------------------------------
 // Type helpers
@@ -113,22 +70,6 @@ function buildPostParamTypes(
   const extended = new Map(base);
   extended.set('result', resultSimpleType);
   return extended;
-}
-
-function buildKnownIdentifiers(
-  node: typescript.FunctionLikeDeclaration,
-  includeResult: boolean,
-): Set<string> {
-  const names = new Set<string>(['this']);
-  for (const param of node.parameters) {
-    if (typescript.isIdentifier(param.name)) {
-      names.add(param.name.text);
-    }
-  }
-  if (includeResult) {
-    names.add('result');
-  }
-  return names;
 }
 
 // ---------------------------------------------------------------------------
