@@ -7,48 +7,11 @@ import {
 import { validateExpression } from './contract-validator';
 import type { ContractTag } from './jsdoc-parser';
 import type { SimpleType } from './contract-validator';
+import { buildReparsedIndex, type ReparsedIndex } from './reparsed-index';
 
 const KIND_PRE = 'pre' as const;
 const KIND_POST = 'post' as const;
 const CHECK_INVARIANTS_NAME = '#checkInvariants' as const;
-
-// ---------------------------------------------------------------------------
-// Reparsed-index: positions → nodes with JSDoc attached
-// ---------------------------------------------------------------------------
-
-interface ReparsedIndex {
-  functions: Map<number, typescript.FunctionLikeDeclaration>;
-  classes: Map<number, typescript.ClassDeclaration>;
-}
-
-/**
- * Re-parse the source file with setParentNodes:true so JSDoc nodes are
- * attached. Returns maps from source position to reparsed node.
- */
-function buildReparsedIndex(sourceFile: typescript.SourceFile): ReparsedIndex {
-  const reparsed = typescript.createSourceFile(
-    sourceFile.fileName,
-    sourceFile.text,
-    sourceFile.languageVersion,
-    /* setParentNodes */ true,
-  );
-
-  const functions = new Map<number, typescript.FunctionLikeDeclaration>();
-  const classes = new Map<number, typescript.ClassDeclaration>();
-
-  function visit(node: typescript.Node): void {
-    if (typescript.isFunctionLike(node)) {
-      functions.set(node.pos, node as typescript.FunctionLikeDeclaration);
-    }
-    if (typescript.isClassDeclaration(node)) {
-      classes.set(node.pos, node);
-    }
-    typescript.forEachChild(node, visit);
-  }
-
-  visit(reparsed);
-  return { functions, classes };
-}
 
 // ---------------------------------------------------------------------------
 // Visibility helpers
