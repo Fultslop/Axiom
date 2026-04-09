@@ -245,3 +245,204 @@ describe('acceptance criterion 5: @post uses result correctly', () => {
     }
   });
 });
+
+describe('interface contracts — @pre fires at runtime', () => {
+  function compileClassWithInterface(
+    ifaceSource: string,
+    classSource: string,
+  ): string {
+    const ifaceFile = 'iface.ts';
+    const classFile = 'class.ts';
+    const files: Record<string, string> = {
+      [ifaceFile]: ifaceSource,
+      [classFile]: classSource,
+    };
+    const compilerOptions: typescript.CompilerOptions = {
+      target: typescript.ScriptTarget.ES2022,
+      module: typescript.ModuleKind.CommonJS,
+      skipLibCheck: true,
+    };
+    const defaultHost = typescript.createCompilerHost(compilerOptions);
+    const fileMap = new Map(Object.entries(files));
+
+    function resolveFileName(name: string): string | undefined {
+      const base = name.split(/[\\/]/).pop() ?? name;
+      if (fileMap.has(base)) return base;
+      if (fileMap.has(name)) return name;
+      return undefined;
+    }
+
+    const host: typescript.CompilerHost = {
+      ...defaultHost,
+      getSourceFile(name, version) {
+        const resolved = resolveFileName(name);
+        if (resolved !== undefined) {
+          const content = files[resolved]!;
+          return typescript.createSourceFile(name, content, version, true);
+        }
+        return defaultHost.getSourceFile(name, version);
+      },
+      fileExists(name) {
+        return resolveFileName(name) !== undefined || defaultHost.fileExists(name);
+      },
+      readFile(name) {
+        const resolved = resolveFileName(name);
+        if (resolved !== undefined) return files[resolved];
+        return defaultHost.readFile(name);
+      },
+      resolveModuleNameLiterals(
+        moduleLiterals,
+        containingFile,
+        _redirectedReference,
+        _compilerOptions,
+      ) {
+        return moduleLiterals.map((moduleLiteral) => {
+          const moduleName = moduleLiteral.text;
+          if (moduleName.startsWith('./')) {
+            const baseName = moduleName.slice(2);
+            const candidate = `${baseName}.ts`;
+            if (fileMap.has(candidate)) {
+              return {
+                resolvedModule: {
+                  resolvedFileName: candidate,
+                  extension: '.ts',
+                  isExternalLibraryImport: false,
+                },
+              };
+            }
+          }
+          return typescript.resolveModuleName(
+            moduleName, containingFile, compilerOptions,
+            { fileExists: host.fileExists, readFile: host.readFile },
+          );
+        });
+      },
+    };
+    const program = typescript.createProgram(
+      [ifaceFile, classFile], compilerOptions, host,
+    );
+    const sourceFile = program.getSourceFile(classFile)!;
+    let output = '';
+    program.emit(
+      sourceFile,
+      (_, text) => { output = text; },
+      undefined,
+      false,
+      { before: [createTransformer(program)] },
+    );
+    return output;
+  }
+
+  function evalWithAllErrors(jsSource: string): Record<string, unknown> {
+    const exports: Record<string, unknown> = {};
+    const mod = { exports };
+    const stripped = jsSource.replace(/.*require\("fsprepost"\).*\n?/g, '');
+    // eslint-disable-next-line no-new-func
+    new Function(
+      'exports', 'module', 'ContractViolationError', 'InvariantViolationError',
+      stripped,
+    )(exports, mod, ContractViolationError, InvariantViolationError);
+    return mod.exports;
+  }
+
+  it('throws ContractViolationError PRE when interface @pre is violated', () => {
+    const ifaceSource = `
+      export interface IAccount {
+        /** @pre amount > 0 */
+        withdraw(amount: number): number;
+      }
+    `;
+    const classSource = `
+      import type { IAccount } from './iface';
+      export class Account implements IAccount {
+        balance = 100;
+        withdraw(amount: number): number {
+          this.balance -= amount;
+          return this.balance;
+        }
+      }
+    `;
+    const compiled = compileClassWithInterface(ifaceSource, classSource);
+    const mod = evalWithAllErrors(compiled);
+    const Cls = mod['Account'] as new () => { withdraw(n: number): number };
+    const acct = new Cls();
+    expect(() => acct.withdraw(-1)).toThrow(ContractViolationError);
+  });
+
+  it('does not throw when interface @pre is satisfied', () => {
+    const ifaceSource = `
+      export interface IAccount {
+        /** @pre amount > 0 */
+        withdraw(amount: number): number;
+      }
+    `;
+    const classSource = `
+      import type { IAccount } from './iface';
+      export class Account implements IAccount {
+        balance = 100;
+        withdraw(amount: number): number {
+          this.balance -= amount;
+          return this.balance;
+        }
+      }
+    `;
+    const compiled = compileClassWithInterface(ifaceSource, classSource);
+    const mod = evalWithAllErrors(compiled);
+    const Cls = mod['Account'] as new () => { withdraw(n: number): number };
+    const acct = new Cls();
+    expect(() => acct.withdraw(50)).not.toThrow();
+  });
+
+  it('throws InvariantViolationError when interface @invariant is violated', () => {
+    const ifaceSource = `
+      /** @invariant this.balance >= 0 */
+      export interface IAccount {
+        withdraw(amount: number): number;
+      }
+    `;
+    const classSource = `
+      import type { IAccount } from './iface';
+      export class Account implements IAccount {
+        balance = 100;
+        withdraw(amount: number): number {
+          this.balance -= amount;
+          return this.balance;
+        }
+      }
+    `;
+    const compiled = compileClassWithInterface(ifaceSource, classSource);
+    const mod = evalWithAllErrors(compiled);
+    const Cls = mod['Account'] as new () => {
+      balance: number; withdraw(n: number): number;
+    };
+    const acct = new Cls();
+    expect(() => acct.withdraw(200)).toThrow(InvariantViolationError);
+  });
+
+  it('fires interface @pre then class @pre when both defined', () => {
+    const ifaceSource = `
+      export interface IAccount {
+        /** @pre amount > 0 */
+        withdraw(amount: number): number;
+      }
+    `;
+    const classSource = `
+      import type { IAccount } from './iface';
+      export class Account implements IAccount {
+        balance = 100;
+        /** @pre amount <= this.balance */
+        withdraw(amount: number): number {
+          this.balance -= amount;
+          return this.balance;
+        }
+      }
+    `;
+    const compiled = compileClassWithInterface(ifaceSource, classSource);
+    const mod = evalWithAllErrors(compiled);
+    const Cls = mod['Account'] as new () => { withdraw(n: number): number };
+    const acct = new Cls();
+    expect(() => acct.withdraw(-1)).toThrow(ContractViolationError);
+    expect(() => acct.withdraw(999)).toThrow(ContractViolationError);
+    expect(() => acct.withdraw(50)).not.toThrow();
+  });
+});

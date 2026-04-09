@@ -1,5 +1,5 @@
 import typescript from 'typescript';
-import { extractContractTags } from '@src/jsdoc-parser';
+import { extractContractTags, extractContractTagsFromNode } from '@src/jsdoc-parser';
 
 function parseFunctionNode(source: string): typescript.FunctionLikeDeclaration {
   const sourceFile = typescript.createSourceFile(
@@ -135,5 +135,39 @@ describe('extractContractTags', () => {
     const tags = extractContractTags(node);
     // The expression should be extracted even when comment is an array
     expect(tags.length).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('extractContractTagsFromNode', () => {
+  it('extracts @pre tags from a MethodSignature node', () => {
+    const source = `
+      interface IFoo {
+        /** @pre amount > 0 */
+        bar(amount: number): void;
+      }
+    `;
+    const sourceFile = typescript.createSourceFile(
+      'test.ts', source, typescript.ScriptTarget.ES2020, true,
+    );
+    const iface = sourceFile.statements[0] as typescript.InterfaceDeclaration;
+    const sig = iface.members[0] as typescript.MethodSignature;
+    const tags = extractContractTagsFromNode(sig);
+    expect(tags).toHaveLength(1);
+    expect(tags[0]).toEqual({ kind: 'pre', expression: 'amount > 0' });
+  });
+
+  it('returns empty array when no contract tags present', () => {
+    const source = `
+      interface IFoo {
+        /** @param amount the amount */
+        bar(amount: number): void;
+      }
+    `;
+    const sourceFile = typescript.createSourceFile(
+      'test.ts', source, typescript.ScriptTarget.ES2020, true,
+    );
+    const iface = sourceFile.statements[0] as typescript.InterfaceDeclaration;
+    const sig = iface.members[0] as typescript.MethodSignature;
+    expect(extractContractTagsFromNode(sig)).toHaveLength(0);
   });
 });

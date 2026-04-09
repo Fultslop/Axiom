@@ -60,9 +60,7 @@ export function extractInvariantExpressions(node: typescript.Node): string[] {
   return result;
 }
 
-export function extractContractTags(
-  node: typescript.FunctionLikeDeclaration,
-): ContractTag[] {
+export function extractContractTagsFromNode(node: typescript.Node): ContractTag[] {
   const jsDocTags = typescript.getJSDocTags(node);
   const result: ContractTag[] = [];
 
@@ -77,4 +75,10 @@ export function extractContractTags(
   }
 
   return result;
+}
+
+export function extractContractTags(
+  node: typescript.FunctionLikeDeclaration,
+): ContractTag[] {
+  return extractContractTagsFromNode(node);
 }

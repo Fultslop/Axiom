@@ -3,6 +3,9 @@ import { buildReparsedIndex, type ReparsedIndex } from './reparsed-index';
 import { tryRewriteFunction, isPublicTarget } from './function-rewriter';
 import { tryRewriteClass } from './class-rewriter';
 import { buildRequireStatement } from './require-injection';
+import type { ParamMismatchMode } from './interface-resolver';
+
+const MODE_IGNORE = 'ignore' as const;
 
 // ---------------------------------------------------------------------------
 // Node visitor
@@ -15,10 +18,15 @@ function visitNode(
   reparsedIndex: ReparsedIndex,
   transformed: { value: boolean },
   warn: (msg: string) => void,
-  checker?: typescript.TypeChecker,
+  checker: typescript.TypeChecker | undefined,
+  reparsedCache: Map<string, typescript.SourceFile>,
+  paramMismatch: ParamMismatchMode,
 ): typescript.Node {
   if (typescript.isClassDeclaration(node)) {
-    return tryRewriteClass(factory, node, reparsedIndex, transformed, warn, checker);
+    return tryRewriteClass(
+      factory, node, reparsedIndex, transformed, warn,
+      checker, reparsedCache, paramMismatch,
+    );
   }
 
   if (
@@ -37,7 +45,10 @@ function visitNode(
 
   return typescript.visitEachChild(
     node,
-    (child) => visitNode(factory, child, context, reparsedIndex, transformed, warn, checker),
+    (child) => visitNode(
+      factory, child, context, reparsedIndex, transformed, warn,
+      checker, reparsedCache, paramMismatch,
+    ),
     context,
   );
 }
@@ -50,12 +61,19 @@ function visitNode(
 // also be used in transpileModule() for unit testing.
 export default function createTransformer(
   _program?: typescript.Program,
-  options?: { warn?: (msg: string) => void },
+  options?: {
+    warn?: (msg: string) => void;
+    interfaceParamMismatch?: 'rename' | 'ignore';
+  },
 ): typescript.TransformerFactory<typescript.SourceFile> {
   const warn = options?.warn ?? ((msg: string): void => {
     process.stderr.write(`${msg}\n`);
   });
+  const rawMode = options?.interfaceParamMismatch;
+  const paramMismatch: ParamMismatchMode = rawMode === MODE_IGNORE ? 'ignore' : 'rename';
   const checker = _program?.getTypeChecker?.();
+  const reparsedCache = new Map<string, typescript.SourceFile>();
+
   return (context: typescript.TransformationContext) => {
     // Use the compiler's own factory so synthesized nodes are compatible
     // with the AST nodes created by the host TypeScript instance.
@@ -66,7 +84,10 @@ export default function createTransformer(
       const transformed = { value: false };
       const visited = typescript.visitEachChild(
         sourceFile,
-        (node) => visitNode(factory, node, context, reparsedIndex, transformed, warn, checker),
+        (node) => visitNode(
+          factory, node, context, reparsedIndex, transformed, warn,
+          checker, reparsedCache, paramMismatch,
+        ),
         context,
       );
 
