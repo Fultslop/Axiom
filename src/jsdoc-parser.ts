@@ -7,6 +7,7 @@ export interface ContractTag {
 
 const PRE_TAG = 'pre' as const;
 const POST_TAG = 'post' as const;
+const INVARIANT_TAG = 'invariant' as const;
 const TYPE_STRING = 'string' as const;
 
 function isStringComment(
@@ -43,6 +44,20 @@ function toContractKind(tagName: string): 'pre' | 'post' | undefined {
     return POST_TAG;
   }
   return undefined;
+}
+
+export function extractInvariantExpressions(node: typescript.Node): string[] {
+  const jsDocTags = typescript.getJSDocTags(node);
+  const result: string[] = [];
+  for (const tag of jsDocTags) {
+    if (tag.tagName.text.toLowerCase() === INVARIANT_TAG) {
+      const expression = resolveTagComment(tag.comment);
+      if (expression.length > 0) {
+        result.push(expression);
+      }
+    }
+  }
+  return result;
 }
 
 export function extractContractTags(

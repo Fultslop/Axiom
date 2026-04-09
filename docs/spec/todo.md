@@ -1,11 +1,9 @@
-* Post with result should match the return type 
-
 
 * Add invariant
 * Add contract on interface
+* Post with result should have the user define a return type 
 * Add 'previous' // @post this.balance === prev - amount 
-* Pre post should work with //
-* fails to compile:
+
 
 /**
  * @pre obj?.value > 0

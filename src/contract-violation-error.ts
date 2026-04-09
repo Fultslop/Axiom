@@ -1,4 +1,6 @@
-export class ContractViolationError extends Error {
+import { ContractError } from './contract-error';
+
+export class ContractViolationError extends ContractError {
   public readonly type: 'PRE' | 'POST';
 
   public readonly expression: string;

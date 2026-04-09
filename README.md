@@ -99,6 +99,71 @@ If you use path aliases (e.g. `@src/`), also add them to `tsconfig.json`:
 
 Tests stay as `.ts` files and VSCode debugs them with full source maps — no `build:dev` step needed for testing.
 
+## Class invariants
+
+Annotate a class with `@invariant` to declare conditions that must hold after every public method exits and after the constructor exits. Requires `"target": "ES2022"` or later in `tsconfig`.
+
+```typescript
+/**
+ * @invariant this.balance >= 0
+ * @invariant this.owner !== null
+ */
+export class BankAccount {
+  balance: number;
+  owner: string;
+
+  constructor(owner: string, initial: number) {
+    this.owner = owner;
+    this.balance = initial;
+    // invariant checked here — throws if initial < 0
+  }
+
+  /**
+   * @pre amount > 0
+   * @pre amount <= this.balance
+   */
+  withdraw(amount: number): void {
+    this.balance -= amount;
+    // invariant checked after body — throws if balance went negative
+  }
+
+  deposit(amount: number): void {
+    this.balance += amount;
+    // invariant checked after body
+  }
+}
+```
+
+Invariant violations throw `InvariantViolationError`:
+
+```typescript
+import { InvariantViolationError } from 'fsprepost';
+
+const acct = new BankAccount('Alice', 100);
+acct.withdraw(200);
+// throws InvariantViolationError: [INVARIANT] Invariant violated at BankAccount.withdraw: this.balance >= 0
+```
+
+The transformer injects a single private `#checkInvariants(location)` method on the class and calls it at each applicable exit point. Private and static methods are not instrumented.
+
+## Error hierarchy
+
+All contract errors share a common base so you can catch them with a single `instanceof` check:
+
+```typescript
+import { ContractError, ContractViolationError, InvariantViolationError } from 'fsprepost';
+
+try {
+  acct.withdraw(-1);
+} catch (err) {
+  if (err instanceof ContractError) {
+    // catches both ContractViolationError and InvariantViolationError
+    err.expression; // the violated expression
+    err.location;   // 'BankAccount.withdraw'
+  }
+}
+```
+
 ## ContractViolationError
 
 ```typescript
@@ -142,14 +207,14 @@ Both functions throw a `ContractViolationError` (with `type: 'PRE'` or `'POST'`)
 
 - `@pre` tags on exported functions and public class methods
 - `@post` tags — the special identifier `result` refers to the return value
-- Multiple `@pre` and `@post` tags on the same function (evaluated in order)
+- `@invariant` tags on classes — checked after constructor and after every public method exit
+- Multiple `@pre`, `@post`, and `@invariant` tags on the same target (evaluated in order)
 - `this` references inside contract expressions (e.g. `amount <= this.balance`)
 - Zero contract overhead in release builds — plain `tsc` ignores JSDoc entirely
 
 ## Not yet in scope
 
-- `@invariant`
-- previous capture
+- previous capture (`@post this.balance === prev - amount`)
 - Arrow functions and function expressions
 - `async` functions and generators
 - Constructor contracts

@@ -8,7 +8,9 @@
  */
 import typescript from 'typescript';
 import createTransformer from '../src/transformer';
+import { ContractError } from '../src/contract-error';
 import { ContractViolationError } from '../src/contract-violation-error';
+import { InvariantViolationError } from '../src/invariant-violation-error';
 
 // The Account fixture, written without the fsprepost import so that the eval
 // scope can provide ContractViolationError directly as a parameter.
@@ -114,6 +116,103 @@ describe('acceptance criterion 3: release build has zero contract code', () => {
     expect(releaseOutput).not.toContain('new ContractViolationError');
     expect(releaseOutput).not.toContain('!(amount > 0)');
   });
+});
+
+function compileES2022(source: string): string {
+  return typescript.transpileModule(source, {
+    compilerOptions: {
+      target: typescript.ScriptTarget.ES2022,
+      module: typescript.ModuleKind.CommonJS,
+    },
+    transformers: { before: [createTransformer()] },
+  }).outputText;
+}
+
+function evalWithInvariants(jsSource: string): Record<string, unknown> {
+  const exports: Record<string, unknown> = {};
+  const mod = { exports };
+  const stripped = jsSource.replace(/.*require\("fsprepost"\).*\n?/g, '');
+  // eslint-disable-next-line no-new-func
+  new Function('exports', 'module', 'ContractViolationError', 'InvariantViolationError', stripped)(
+    exports,
+    mod,
+    ContractViolationError,
+    InvariantViolationError,
+  );
+  return mod.exports;
+}
+
+describe('acceptance criterion 3 (spec 003): @invariant throws InvariantViolationError', () => {
+  const INVARIANT_SOURCE = `
+    class BankAccount {
+      balance;
+      constructor(initial) { this.balance = initial; }
+    }
+  `;
+
+  const INVARIANT_CLASS_SOURCE = `
+    /** @invariant this.balance >= 0 */
+    export class BankAccount {
+      balance = 100;
+      deposit(amount) { this.balance += amount; }
+      withdraw(amount) { this.balance -= amount; }
+      constructor(initial) { this.balance = initial; }
+    }
+  `;
+
+  it('throws InvariantViolationError when method leaves invariant broken', () => {
+    const compiled = compileES2022(INVARIANT_CLASS_SOURCE);
+    const mod = evalWithInvariants(compiled);
+    const Cls = mod['BankAccount'] as new (n: number) => { balance: number; withdraw(n: number): void };
+    const acct = new Cls(100);
+    expect(() => acct.withdraw(200)).toThrow(InvariantViolationError);
+  });
+
+  it('thrown InvariantViolationError has correct expression and location', () => {
+    const compiled = compileES2022(INVARIANT_CLASS_SOURCE);
+    const mod = evalWithInvariants(compiled);
+    const Cls = mod['BankAccount'] as new (n: number) => { balance: number; withdraw(n: number): void };
+    const acct = new Cls(100);
+    try {
+      acct.withdraw(200);
+    } catch (err) {
+      expect(err).toBeInstanceOf(InvariantViolationError);
+      if (err instanceof InvariantViolationError) {
+        expect(err.expression).toBe('this.balance >= 0');
+        expect(err.location).toBe('BankAccount.withdraw');
+      }
+    }
+  });
+
+  it('throws InvariantViolationError from constructor when invariant not established', () => {
+    const compiled = compileES2022(INVARIANT_CLASS_SOURCE);
+    const mod = evalWithInvariants(compiled);
+    const Cls = mod['BankAccount'] as new (n: number) => unknown;
+    expect(() => new Cls(-1)).toThrow(InvariantViolationError);
+  });
+
+  it('valid operations do not throw', () => {
+    const compiled = compileES2022(INVARIANT_CLASS_SOURCE);
+    const mod = evalWithInvariants(compiled);
+    const Cls = mod['BankAccount'] as new (n: number) => { balance: number; withdraw(n: number): void; deposit(n: number): void };
+    const acct = new Cls(100);
+    expect(() => acct.deposit(50)).not.toThrow();
+    expect(() => acct.withdraw(50)).not.toThrow();
+  });
+
+  it('InvariantViolationError is caught by ContractError', () => {
+    const compiled = compileES2022(INVARIANT_CLASS_SOURCE);
+    const mod = evalWithInvariants(compiled);
+    const Cls = mod['BankAccount'] as new (n: number) => { withdraw(n: number): void };
+    const acct = new Cls(100);
+    try {
+      acct.withdraw(200);
+    } catch (err) {
+      expect(err).toBeInstanceOf(ContractError);
+    }
+  });
+
+  void INVARIANT_SOURCE; // suppress unused warning — kept for reference
 });
 
 describe('acceptance criterion 5: @post uses result correctly', () => {

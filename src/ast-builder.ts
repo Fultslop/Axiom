@@ -405,6 +405,65 @@ export function buildBodyCapture(
   );
 }
 
+function buildThrowInvariantViolation(
+  factory: typescript.NodeFactory,
+  expression: string,
+  locationExpr: typescript.Expression,
+): typescript.ThrowStatement {
+  return factory.createThrowStatement(
+    factory.createNewExpression(
+      factory.createIdentifier('InvariantViolationError'),
+      undefined,
+      [factory.createStringLiteral(expression), locationExpr],
+    ),
+  );
+}
+
+export function buildCheckInvariantsCall(
+  location: string,
+  factory: typescript.NodeFactory = typescript.factory,
+): typescript.ExpressionStatement {
+  return factory.createExpressionStatement(
+    factory.createCallExpression(
+      factory.createPropertyAccessExpression(
+        factory.createThis(),
+        factory.createPrivateIdentifier('#checkInvariants'),
+      ),
+      undefined,
+      [factory.createStringLiteral(location)],
+    ),
+  );
+}
+
+export function buildCheckInvariantsMethod(
+  invariantExpressions: string[],
+  factory: typescript.NodeFactory = typescript.factory,
+): typescript.MethodDeclaration {
+  const locationRef = factory.createIdentifier('location');
+  const checks = invariantExpressions.map((expr) =>
+    buildGuardIf(factory, expr, buildThrowInvariantViolation(factory, expr, locationRef)),
+  );
+  return factory.createMethodDeclaration(
+    undefined,
+    undefined,
+    factory.createPrivateIdentifier('#checkInvariants'),
+    undefined,
+    undefined,
+    [
+      factory.createParameterDeclaration(
+        undefined,
+        undefined,
+        factory.createIdentifier('location'),
+        undefined,
+        factory.createKeywordTypeNode(typescript.SyntaxKind.StringKeyword),
+        undefined,
+      ),
+    ],
+    factory.createKeywordTypeNode(typescript.SyntaxKind.VoidKeyword),
+    factory.createBlock(checks, true),
+  );
+}
+
 export function buildResultReturn(
   factory: typescript.NodeFactory = typescript.factory,
 ): typescript.ReturnStatement {
