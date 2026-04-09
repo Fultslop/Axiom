@@ -2,45 +2,7 @@ import typescript from 'typescript';
 import { buildReparsedIndex, type ReparsedIndex } from './reparsed-index';
 import { tryRewriteFunction, isPublicTarget } from './function-rewriter';
 import { tryRewriteClass } from './class-rewriter';
-
-// ---------------------------------------------------------------------------
-// require() injection
-// ---------------------------------------------------------------------------
-
-function buildRequireStatement(
-  factory: typescript.NodeFactory,
-): typescript.VariableStatement {
-  // Inject as a require() call rather than an import declaration so TypeScript's
-  // CJS emit cannot elide it (import elision skips imports with no parse-time
-  // value usage; synthetic usages added in a before-transformer are invisible).
-  return factory.createVariableStatement(
-    undefined,
-    factory.createVariableDeclarationList(
-      [factory.createVariableDeclaration(
-        factory.createObjectBindingPattern([
-          factory.createBindingElement(
-            undefined,
-            undefined,
-            factory.createIdentifier('ContractViolationError'),
-          ),
-          factory.createBindingElement(
-            undefined,
-            undefined,
-            factory.createIdentifier('InvariantViolationError'),
-          ),
-        ]),
-        undefined,
-        undefined,
-        factory.createCallExpression(
-          factory.createIdentifier('require'),
-          undefined,
-          [factory.createStringLiteral('fsprepost')],
-        ),
-      )],
-      typescript.NodeFlags.Const,
-    ),
-  );
-}
+import { buildRequireStatement } from './require-injection';
 
 // ---------------------------------------------------------------------------
 // Node visitor
