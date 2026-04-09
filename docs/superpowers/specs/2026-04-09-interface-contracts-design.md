@@ -1,7 +1,7 @@
 # Interface Contracts — Design Doc
 
-**Date:** 2026-04-09
-**Scope:** `@pre`, `@post`, and `@invariant` on TypeScript interfaces; inherited by all implementing classes
+**Date:** 2026-04-09  
+**Scope:** `@pre`, `@post`, and `@invariant` on TypeScript interfaces; inherited by all implementing classes  
 
 ---
 
