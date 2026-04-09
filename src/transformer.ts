@@ -6,71 +6,15 @@ import {
 } from './ast-builder';
 import { validateExpression } from './contract-validator';
 import type { ContractTag } from './jsdoc-parser';
-import type { SimpleType } from './contract-validator';
+import {
+  buildParameterTypes, buildPostParamTypes, type SimpleType,
+} from './type-helpers';
 import { buildReparsedIndex, type ReparsedIndex } from './reparsed-index';
 import { isPublicTarget, buildLocationName, buildKnownIdentifiers } from './node-helpers';
 
 const KIND_PRE = 'pre' as const;
 const KIND_POST = 'post' as const;
 const CHECK_INVARIANTS_NAME = '#checkInvariants' as const;
-
-// ---------------------------------------------------------------------------
-// Type helpers
-// ---------------------------------------------------------------------------
-
-function simpleTypeFromFlags(flags: number): SimpleType | undefined {
-  /* eslint-disable no-bitwise */
-  if (flags & typescript.TypeFlags.NumberLike) {
-    return 'number';
-  }
-  if (flags & typescript.TypeFlags.StringLike) {
-    return 'string';
-  }
-  if (flags & typescript.TypeFlags.BooleanLike) {
-    return 'boolean';
-  }
-  /* eslint-enable no-bitwise */
-  return undefined;
-}
-
-function buildParameterTypes(
-  node: typescript.FunctionLikeDeclaration,
-  checker: typescript.TypeChecker,
-): Map<string, SimpleType> {
-  const types = new Map<string, SimpleType>();
-  for (const param of node.parameters) {
-    if (typescript.isIdentifier(param.name)) {
-      const paramType = checker.getTypeAtLocation(param);
-      const simpleType = simpleTypeFromFlags(paramType.flags);
-      if (simpleType !== undefined) {
-        types.set(param.name.text, simpleType);
-      }
-    }
-  }
-  return types;
-}
-
-function buildPostParamTypes(
-  node: typescript.FunctionLikeDeclaration,
-  checker: typescript.TypeChecker | undefined,
-  base: Map<string, SimpleType> | undefined,
-): Map<string, SimpleType> | undefined {
-  if (checker === undefined || base === undefined) {
-    return base;
-  }
-  const sig = checker.getSignatureFromDeclaration(node);
-  if (sig === undefined) {
-    return base;
-  }
-  const returnType = checker.getReturnTypeOfSignature(sig);
-  const resultSimpleType = simpleTypeFromFlags(returnType.flags);
-  if (resultSimpleType === undefined) {
-    return base;
-  }
-  const extended = new Map(base);
-  extended.set('result', resultSimpleType);
-  return extended;
-}
 
 // ---------------------------------------------------------------------------
 // Tag validation
