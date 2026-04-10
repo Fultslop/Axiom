@@ -917,4 +917,45 @@ describe('transformer', () => {
       expect(output).toContain('const __axiom_prev__ = this.balance');
     });
   });
+
+  describe('global identifier whitelist', () => {
+    it('injects @pre using Math.abs without warning', () => {
+      const source = `
+        /**
+         * @pre Math.abs(delta) < 1
+         */
+        export function nudge(delta: number): void {}
+      `;
+      const warnings: string[] = [];
+      const output = transform(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      expect(output).toContain('!(Math.abs(delta) < 1)');
+    });
+
+    it('injects @pre using isNaN without warning', () => {
+      const source = `
+        /**
+         * @pre isNaN(value) === false
+         */
+        export function parse(value: number): number { return value; }
+      `;
+      const warnings: string[] = [];
+      const output = transform(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      expect(output).toContain('!(isNaN(value) === false)');
+    });
+
+    it('injects @pre using JSON.stringify without warning', () => {
+      const source = `
+        /**
+         * @pre JSON.stringify(obj) !== ""
+         */
+        export function serialize(obj: object): string { return ""; }
+      `;
+      const warnings: string[] = [];
+      const output = transform(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      expect(output).toContain('!(JSON.stringify(obj) !== "")');
+    });
+  });
 });
