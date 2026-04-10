@@ -89,10 +89,10 @@ describe('transformer', () => {
       }
     `;
     const output = transform(source);
-    expect(output).toContain('const result');
-    expect(output).toContain('!(result >= 0)');
+    expect(output).toContain('const __axiom_result__');
+    expect(output).toContain('!(__axiom_result__ >= 0)');
     expect(output).toContain('"POST"');
-    expect(output).toContain('return result');
+    expect(output).toContain('return __axiom_result__');
   });
 
   it('injects multiple @pre checks in order', () => {
@@ -124,9 +124,9 @@ describe('transformer', () => {
     `;
     const output = transform(source);
     const preIdx = output.indexOf('"PRE"');
-    const captureIdx = output.indexOf('const result');
+    const captureIdx = output.indexOf('const __axiom_result__');
     const postIdx = output.indexOf('"POST"');
-    const returnIdx = output.lastIndexOf('return result');
+    const returnIdx = output.lastIndexOf('return __axiom_result__');
     expect(preIdx).toBeGreaterThanOrEqual(0);
     expect(captureIdx).toBeGreaterThan(preIdx);
     expect(postIdx).toBeGreaterThan(captureIdx);
@@ -237,10 +237,10 @@ describe('transformer', () => {
       }
     `;
     const output = transform(source);
-    expect(output).toContain('const result');
-    expect(output).toContain('!(result === "bar")');
+    expect(output).toContain('const __axiom_result__');
+    expect(output).toContain('!(__axiom_result__ === "bar")');
     expect(output).toContain('"POST"');
-    expect(output).toContain('return result');
+    expect(output).toContain('return __axiom_result__');
   });
 
   it('injects post-check for function body containing a for-of loop', () => {
@@ -255,10 +255,10 @@ describe('transformer', () => {
       }
     `;
     const output = transform(source);
-    expect(output).toContain('const result');
-    expect(output).toContain('!(result > 0)');
+    expect(output).toContain('const __axiom_result__');
+    expect(output).toContain('!(__axiom_result__ > 0)');
     expect(output).toContain('"POST"');
-    expect(output).toContain('return result');
+    expect(output).toContain('return __axiom_result__');
   });
 
   it('skips @pre tag with assignment operator and emits a warning', () => {
@@ -354,7 +354,7 @@ describe('transformer', () => {
     `;
     const output = transform(source, warn);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('no return type is declared'));
-    expect(output).not.toContain('const result =');
+    expect(output).not.toContain('const __axiom_result__ =');
     expect(output).not.toContain('"POST"');
   });
 
@@ -366,7 +366,7 @@ describe('transformer', () => {
     `;
     const output = transform(source, warn);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("return type is 'void'"));
-    expect(output).not.toContain('const result =');
+    expect(output).not.toContain('const __axiom_result__ =');
     expect(output).not.toContain('"POST"');
   });
 
@@ -378,7 +378,7 @@ describe('transformer', () => {
     `;
     const output = transform(source, warn);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("return type is 'never'"));
-    expect(output).not.toContain('const result =');
+    expect(output).not.toContain('const __axiom_result__ =');
     expect(output).not.toContain('"POST"');
   });
 
@@ -820,8 +820,8 @@ describe('transformer', () => {
         }
       `;
       const output = transformWithProgram(source);
-      expect(output).toContain('const prev = ({ ...this })');
-      expect(output).toContain('!(this.balance === prev.balance + x)');
+      expect(output).toContain('const __axiom_prev__ = ({ ...this })');
+      expect(output).toContain('!(this.balance === __axiom_prev__.balance + x)');
     });
 
     it('injects deepSnapshot(this) for @prev deep', () => {
@@ -835,7 +835,7 @@ describe('transformer', () => {
         }
       `;
       const output = transformWithProgram(source);
-      expect(output).toContain('const prev = deepSnapshot(this)');
+      expect(output).toContain('const __axiom_prev__ = deepSnapshot(this)');
     });
 
     it('injects verbatim expression for @prev with custom expression', () => {
@@ -849,7 +849,7 @@ describe('transformer', () => {
         }
       `;
       const output = transformWithProgram(source);
-      expect(output).toContain('const prev = ({ balance: this.balance, x })');
+      expect(output).toContain('const __axiom_prev__ = ({ balance: this.balance, x })');
     });
 
     it('supports scalar prev capture', () => {
@@ -863,8 +863,8 @@ describe('transformer', () => {
         }
       `;
       const output = transformWithProgram(source);
-      expect(output).toContain('const prev = this.balance');
-      expect(output).toContain('!(this.balance === prev + x)');
+      expect(output).toContain('const __axiom_prev__ = this.balance');
+      expect(output).toContain('!(this.balance === __axiom_prev__ + x)');
     });
 
     it('warns and drops @post for standalone function with prev in @post and no @prev', () => {
@@ -875,7 +875,7 @@ describe('transformer', () => {
       `;
       const output = transform(source, warn);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("'prev' used but no @prev"));
-      expect(output).not.toContain('const prev');
+      expect(output).not.toContain('const __axiom_prev__');
     });
 
     it('works for standalone function with @prev expression', () => {
@@ -886,8 +886,8 @@ describe('transformer', () => {
       const output = transformWithProgram(source);
       // Note: TypeScript's printer may attach trailing comments from the original
       // source to synthesized nodes, so we check for the key parts rather than exact text
-      expect(output).toContain('const prev =');
-      expect(output).toContain('!(result === prev.x + 1)');
+      expect(output).toContain('const __axiom_prev__ =');
+      expect(output).toContain('!(__axiom_result__ === __axiom_prev__.x + 1)');
     });
 
     it('does not inject const prev when @post has no prev reference', () => {
@@ -897,7 +897,7 @@ describe('transformer', () => {
       `;
       const output = transform(source);
       // For standalone function with no prev reference, no const prev should appear
-      expect(output).not.toContain('const prev');
+      expect(output).not.toContain('const __axiom_prev__');
     });
 
     it('warns when multiple @prev tags are present, uses first', () => {
@@ -914,7 +914,7 @@ describe('transformer', () => {
       const output = transformWithProgram(source, warn);
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('multiple @prev'));
       // First tag is 'this.balance', so prev should be that
-      expect(output).toContain('const prev = this.balance');
+      expect(output).toContain('const __axiom_prev__ = this.balance');
     });
   });
 });

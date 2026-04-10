@@ -4,6 +4,13 @@ import { reifyExpression, reifyStatement } from './reifier';
 const PRE_CONTRACT = 'PRE' as const;
 const POST_CONTRACT = 'POST' as const;
 
+export const AXIOM_RESULT_VAR = '__axiom_result__';
+export const AXIOM_PREV_VAR = '__axiom_prev__';
+
+type ContractIdentifier = 'result' | 'prev';
+const IDENTIFIER_RESULT: ContractIdentifier = 'result';
+const IDENTIFIER_PREV: ContractIdentifier = 'prev';
+
 export function parseContractExpression(expression: string): typescript.Expression {
   const tempSourceFile = typescript.createSourceFile(
     'expr.ts',
@@ -16,6 +23,24 @@ export function parseContractExpression(expression: string): typescript.Expressi
     throw new Error(`Failed to parse contract expression: ${expression}`);
   }
   return stmt.expression;
+}
+
+function substituteContractIdentifiers(
+  factory: typescript.NodeFactory,
+  node: typescript.Expression,
+): typescript.Expression {
+  const visitor = (child: typescript.Node): typescript.Node => {
+    if (typescript.isIdentifier(child)) {
+      if (child.text === IDENTIFIER_RESULT) {
+        return factory.createIdentifier(AXIOM_RESULT_VAR);
+      }
+      if (child.text === IDENTIFIER_PREV) {
+        return factory.createIdentifier(AXIOM_PREV_VAR);
+      }
+    }
+    return typescript.visitEachChild(child, visitor, undefined);
+  };
+  return typescript.visitNode(node, visitor) as typescript.Expression;
 }
 
 function buildThrowContractViolation(
@@ -41,6 +66,7 @@ function buildGuardIf(
   factory: typescript.NodeFactory,
   expression: string,
   body: typescript.ThrowStatement,
+  substituteIdentifiers = false,
 ): typescript.IfStatement {
   const tempSourceFile = typescript.createSourceFile(
     'expr.ts',
@@ -55,7 +81,10 @@ function buildGuardIf(
     throw new Error(`Failed to parse contract expression: ${expression}`);
   }
 
-  const synthesizedCondition = reifyExpression(factory, parsedCondition.expression);
+  const expressionToReify = substituteIdentifiers
+    ? substituteContractIdentifiers(factory, parsedCondition.expression)
+    : parsedCondition.expression;
+  const synthesizedCondition = reifyExpression(factory, expressionToReify);
 
   return factory.createIfStatement(synthesizedCondition, body);
 }
@@ -81,6 +110,7 @@ export function buildPostCheck(
     factory,
     expression,
     buildThrowContractViolation(factory, POST_CONTRACT, expression, location),
+    true,
   );
 }
 
@@ -109,7 +139,7 @@ export function buildBodyCapture(
     undefined,
     factory.createVariableDeclarationList(
       [factory.createVariableDeclaration(
-        factory.createIdentifier('result'),
+        factory.createIdentifier(AXIOM_RESULT_VAR),
         undefined,
         undefined,
         iife,
@@ -181,7 +211,7 @@ export function buildCheckInvariantsMethod(
 export function buildResultReturn(
   factory: typescript.NodeFactory = typescript.factory,
 ): typescript.ReturnStatement {
-  return factory.createReturnStatement(factory.createIdentifier('result'));
+  return factory.createReturnStatement(factory.createIdentifier(AXIOM_RESULT_VAR));
 }
 
 export function buildPrevCapture(
@@ -200,7 +230,7 @@ export function buildPrevCapture(
     undefined,
     factory.createVariableDeclarationList(
       [factory.createVariableDeclaration(
-        factory.createIdentifier('prev'),
+        factory.createIdentifier(AXIOM_PREV_VAR),
         undefined,
         undefined,
         reified,

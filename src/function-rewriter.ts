@@ -14,6 +14,7 @@ const KIND_PRE = 'pre' as const;
 const KIND_POST = 'post' as const;
 const RESULT_ID = 'result' as const;
 const RETURN_TYPE_OK = 'ok' as const;
+const PREV_ID = 'prev' as const;
 
 function expressionUsesResult(expression: string): boolean {
   try {
@@ -87,7 +88,7 @@ function expressionUsesPrev(expression: string): boolean {
     let found = false;
     function walk(node: typescript.Node): void {
       if (!found) {
-        if (typescript.isIdentifier(node) && node.text === 'prev') {
+        if (typescript.isIdentifier(node) && node.text === PREV_ID) {
           found = true;
         } else {
           typescript.forEachChild(node, walk);
@@ -114,7 +115,7 @@ function resolvePrevCapture(
     // Check for multiple @prev tags
     const jsDocTags = typescript.getJSDocTags(reparsedNode);
     const prevTags = jsDocTags.filter(
-      (tag) => tag.tagName.text.toLowerCase() === 'prev',
+      (tag) => tag.tagName.text.toLowerCase() === PREV_ID,
     );
     if (prevTags.length > 1) {
       warn(
@@ -344,7 +345,9 @@ function rewriteFunction(
       node, reparsedNode, interfaceMethodContracts, location, warn,
     );
   }
-  const postTagsFiltered = filterPostTagsRequiringPrev(postTagsWithResult, prevCapture, location, warn);
+  const postTagsFiltered = filterPostTagsRequiringPrev(
+    postTagsWithResult, prevCapture, location, warn,
+  );
 
   const postTags = filterValidTags(
     postTagsFiltered, KIND_POST, location, warn, postKnown, postParamTypes,
