@@ -117,6 +117,13 @@ export function reifyExpression(
     return factory.createTypeOfExpression(reifyExpression(factory, node.expression));
   }
 
+  if (typescript.isObjectLiteralExpression(node)) {
+    return factory.createObjectLiteralExpression(
+      Array.from(node.properties).map((prop) => reifyObjectProperty(factory, prop)),
+      false, // not multi-line
+    );
+  }
+
   const compositeResult = reifyCompositeExpression(factory, node);
   if (compositeResult !== undefined) {
     return compositeResult;
@@ -285,4 +292,24 @@ export function reifyStatement(
   }
 
   throw new Error(`Unsupported statement node kind: ${typescript.SyntaxKind[node.kind]}`);
+}
+
+function reifyObjectProperty(
+  factory: typescript.NodeFactory,
+  prop: typescript.ObjectLiteralElementLike,
+): typescript.ObjectLiteralElementLike {
+  if (typescript.isPropertyAssignment(prop)) {
+    return factory.createPropertyAssignment(
+      prop.name,
+      reifyExpression(factory, prop.initializer),
+    );
+  }
+  if (typescript.isShorthandPropertyAssignment(prop)) {
+    return factory.createShorthandPropertyAssignment(prop.name);
+  }
+  if (typescript.isSpreadAssignment(prop)) {
+    return factory.createSpreadAssignment(reifyExpression(factory, prop.expression));
+  }
+  // For methods/accessors in object literals (rare in prev expressions), fall back
+  return prop;
 }

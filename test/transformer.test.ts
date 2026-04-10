@@ -140,7 +140,7 @@ describe('transformer', () => {
     `;
     const output = transform(source);
     expect(output).toContain('ContractViolationError');
-    expect(output).toContain('fsprepost');
+    expect(output).toContain('axiom');
   });
 
   it('skips non-exported functions silently', () => {
@@ -602,7 +602,7 @@ describe('transformer', () => {
       `;
       const output = transformES2022(source);
       expect(output).toContain('InvariantViolationError');
-      expect(output).toContain('fsprepost');
+      expect(output).toContain('axiom');
     });
 
     it('warns and skips invariant injection when #checkInvariants already defined', () => {
@@ -806,5 +806,115 @@ describe('transformer', () => {
     );
     expect(output).not.toContain('amount > 0');
     expect(warnings.some((w) => w.includes('skipped'))).toBe(true);
+  });
+
+  describe('@prev capture for @post conditions', () => {
+    it('injects const prev = { ...this } for method with prev in @post and no @prev tag', () => {
+      const source = `
+        class Account {
+          balance = 100;
+          /** @post this.balance === prev.balance + x */
+          public addToBalance(x: number): void {
+            this.balance += x;
+          }
+        }
+      `;
+      const output = transformWithProgram(source);
+      expect(output).toContain('const prev = ({ ...this })');
+      expect(output).toContain('!(this.balance === prev.balance + x)');
+    });
+
+    it('injects deepSnapshot(this) for @prev deep', () => {
+      const source = `
+        class Account {
+          balance = 100;
+          /** @prev deep @post this.balance === prev.balance + x */
+          public addToBalance(x: number): void {
+            this.balance += x;
+          }
+        }
+      `;
+      const output = transformWithProgram(source);
+      expect(output).toContain('const prev = deepSnapshot(this)');
+    });
+
+    it('injects verbatim expression for @prev with custom expression', () => {
+      const source = `
+        class Account {
+          balance = 100;
+          /** @prev { balance: this.balance, x } @post this.balance === prev.balance + x */
+          public addToBalance(x: number): void {
+            this.balance += x;
+          }
+        }
+      `;
+      const output = transformWithProgram(source);
+      expect(output).toContain('const prev = ({ balance: this.balance, x })');
+    });
+
+    it('supports scalar prev capture', () => {
+      const source = `
+        class Account {
+          balance = 100;
+          /** @prev this.balance @post this.balance === prev + x */
+          public addToBalance(x: number): void {
+            this.balance += x;
+          }
+        }
+      `;
+      const output = transformWithProgram(source);
+      expect(output).toContain('const prev = this.balance');
+      expect(output).toContain('!(this.balance === prev + x)');
+    });
+
+    it('warns and drops @post for standalone function with prev in @post and no @prev', () => {
+      const warn = jest.fn();
+      const source = `
+        /** @post result === prev.x + 1 */
+        export function foo(x: number): number { return x + 1; }
+      `;
+      const output = transform(source, warn);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("'prev' used but no @prev"));
+      expect(output).not.toContain('const prev');
+    });
+
+    it('works for standalone function with @prev expression', () => {
+      const source = `
+        /** @prev { x } @post result === prev.x + 1 */
+        export function foo(x: number): number { return x + 1; }
+      `;
+      const output = transformWithProgram(source);
+      // Note: TypeScript's printer may attach trailing comments from the original
+      // source to synthesized nodes, so we check for the key parts rather than exact text
+      expect(output).toContain('const prev =');
+      expect(output).toContain('!(result === prev.x + 1)');
+    });
+
+    it('does not inject const prev when @post has no prev reference', () => {
+      const source = `
+        /** @post result > 0 */
+        export function foo(x: number): number { return x + 1; }
+      `;
+      const output = transform(source);
+      // For standalone function with no prev reference, no const prev should appear
+      expect(output).not.toContain('const prev');
+    });
+
+    it('warns when multiple @prev tags are present, uses first', () => {
+      const warn = jest.fn();
+      const source = `
+        class Account {
+          balance = 100;
+          /** @prev this.balance @prev deep @post this.balance === prev + x */
+          public addToBalance(x: number): void {
+            this.balance += x;
+          }
+        }
+      `;
+      const output = transformWithProgram(source, warn);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('multiple @prev'));
+      // First tag is 'this.balance', so prev should be that
+      expect(output).toContain('const prev = this.balance');
+    });
   });
 });

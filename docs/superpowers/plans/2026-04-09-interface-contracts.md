@@ -532,7 +532,7 @@ function extractMethodContracts(
 
   if (ifaceParams.length !== classParams.length) {
     warn(
-      `[fsprepost] Parameter count mismatch in ${location}:`
+      `[axiom] Parameter count mismatch in ${location}:`
       + `\n  interface ${ifaceName} has ${ifaceParams.length} parameters,`
       + ` class has ${classParams.length} — interface contracts skipped`,
     );
@@ -548,7 +548,7 @@ function extractMethodContracts(
       .join(', ');
     const action = mode === 'rename' ? 'expression renamed' : 'contract skipped';
     warn(
-      `[fsprepost] Parameter name mismatch in ${location}:`
+      `[axiom] Parameter name mismatch in ${location}:`
       + `\n  interface ${ifaceName}: ${pairs} — ${action}`,
     );
     if (mode === 'ignore') {
@@ -970,7 +970,7 @@ function emitMethodMergeWarnings(
     classTags.some((tag) => tag.kind === 'pre')
   ) {
     warn(
-      `[fsprepost] Contract merge warning in ${location}:`
+      `[axiom] Contract merge warning in ${location}:`
       + `\n  both ${ifaceName} and ${className} define @pre tags`
       + ' — additive merge applied',
     );
@@ -980,7 +980,7 @@ function emitMethodMergeWarnings(
     classTags.some((tag) => tag.kind === 'post')
   ) {
     warn(
-      `[fsprepost] Contract merge warning in ${location}:`
+      `[axiom] Contract merge warning in ${location}:`
       + `\n  both ${ifaceName} and ${className} define @post tags`
       + ' — additive merge applied',
     );
@@ -1004,7 +1004,7 @@ function resolveEffectiveInvariants(
 
   if (interfaceInvariants.length > 0 && classRaw.length > 0) {
     warn(
-      `[fsprepost] Contract merge warning in ${className}:`
+      `[axiom] Contract merge warning in ${className}:`
       + '\n  both interface and class define @invariant tags'
       + ' — additive merge applied',
     );
@@ -1015,7 +1015,7 @@ function resolveEffectiveInvariants(
 
   if (valid.length > 0 && hasClashingMember(node)) {
     warn(
-      `[fsprepost] Cannot inject invariants into`
+      `[axiom] Cannot inject invariants into`
       + ` ${className}: ${CHECK_INVARIANTS_NAME} already defined`,
     );
     return [];
@@ -1103,7 +1103,7 @@ function rewriteClass(
 
   if (checker === undefined && hasImplementsClauses(node)) {
     warn(
-      `[fsprepost] Interface contract resolution skipped in ${node.getSourceFile().fileName}:`
+      `[axiom] Interface contract resolution skipped in ${node.getSourceFile().fileName}:`
       + '\n  no TypeChecker available (transpileModule mode)'
       + ' — class-level contracts unaffected',
     );
@@ -1439,7 +1439,7 @@ function compileClassWithInterface(
 function evalWithAllErrors(jsSource: string): Record<string, unknown> {
   const exports: Record<string, unknown> = {};
   const mod = { exports };
-  const stripped = jsSource.replace(/.*require\("fsprepost"\).*\n?/g, '');
+  const stripped = jsSource.replace(/.*require\("axiom"\).*\n?/g, '');
   // eslint-disable-next-line no-new-func
   new Function(
     'exports', 'module', 'ContractViolationError', 'InvariantViolationError',

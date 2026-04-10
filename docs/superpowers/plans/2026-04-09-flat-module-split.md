@@ -729,7 +729,7 @@ export function filterValidTags(
     if (errors.length > 0) {
       errors.forEach((err) => {
         warn(
-          `[fsprepost] Contract validation warning in ${location}:`
+          `[axiom] Contract validation warning in ${location}:`
           + `\n  @${kind} ${err.expression} — ${err.message}`,
         );
       });
@@ -973,7 +973,7 @@ export function filterValidInvariants(
     if (errors.length > 0) {
       errors.forEach((err) => {
         warn(
-          `[fsprepost] Invariant validation warning in ${className}:`
+          `[axiom] Invariant validation warning in ${className}:`
           + `\n  @invariant ${err.expression} — ${err.message}`,
         );
       });
@@ -1046,7 +1046,7 @@ function resolveEffectiveInvariants(
   const valid = filterValidInvariants(raw, className, warn);
   if (valid.length > 0 && hasClashingMember(node)) {
     const clashMsg = `${className}: ${CHECK_INVARIANTS_NAME} already defined`;
-    warn(`[fsprepost] Cannot inject invariants into ${clashMsg}`);
+    warn(`[axiom] Cannot inject invariants into ${clashMsg}`);
     return [];
   }
   return valid;

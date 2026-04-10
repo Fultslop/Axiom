@@ -1,6 +1,3 @@
-
-* Post with result should have the user define a return type 
-* Transformer should write to stdout/stderr
 * Add 'previous' // @post this.balance === prev - amount 
 * rename result and previous internally to something that has less chance of a conflict, eg __result__ and __previous__
 * liskov aware contracts

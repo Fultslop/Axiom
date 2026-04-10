@@ -8,6 +8,7 @@ export interface ContractTag {
 const PRE_TAG = 'pre' as const;
 const POST_TAG = 'post' as const;
 const INVARIANT_TAG = 'invariant' as const;
+const PREV_TAG = 'prev' as const;
 const TYPE_STRING = 'string' as const;
 
 function isStringComment(
@@ -81,4 +82,21 @@ export function extractContractTags(
   node: typescript.FunctionLikeDeclaration,
 ): ContractTag[] {
   return extractContractTagsFromNode(node);
+}
+
+export function extractPrevExpression(node: typescript.Node): string | undefined {
+  const jsDocTags = typescript.getJSDocTags(node);
+  for (const tag of jsDocTags) {
+    if (tag.tagName.text.toLowerCase() === PREV_TAG) {
+      const comment = resolveTagComment(tag.comment);
+      if (comment.length === 0) {
+        return undefined;
+      }
+      if (comment === 'deep') {
+        return 'deepSnapshot(this)';
+      }
+      return comment;
+    }
+  }
+  return undefined;
 }

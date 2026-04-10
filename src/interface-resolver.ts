@@ -1,6 +1,7 @@
 import typescript from 'typescript';
 import {
   extractContractTagsFromNode, extractInvariantExpressions,
+  extractPrevExpression,
 } from './jsdoc-parser';
 import type { ContractTag } from './jsdoc-parser';
 
@@ -17,6 +18,7 @@ export interface InterfaceMethodContracts {
   preTags: ContractTag[];
   postTags: ContractTag[];
   sourceInterface: string;
+  prevExpression?: string;
 }
 
 export interface InterfaceContracts {
@@ -141,7 +143,7 @@ function extractMethodContracts(
 
   if (ifaceParams.length !== classParams.length) {
     warn(
-      `[fsprepost] Parameter count mismatch in ${location}:`
+      `[axiom] Parameter count mismatch in ${location}:`
       + `\n  interface ${ifaceName} has ${ifaceParams.length} parameters,`
       + ` class has ${classParams.length} — interface contracts skipped`,
     );
@@ -157,7 +159,7 @@ function extractMethodContracts(
       .join(', ');
     const action = mode === MODE_RENAME ? ACTION_RENAMED : ACTION_SKIPPED;
     warn(
-      `[fsprepost] Parameter name mismatch in ${location}:`
+      `[axiom] Parameter name mismatch in ${location}:`
       + `\n  interface ${ifaceName}: ${pairs} — ${action}`,
     );
     if (mode === MODE_IGNORE) {
@@ -169,15 +171,27 @@ function extractMethodContracts(
   const preTags = allTags.filter((tag) => tag.kind === KIND_PRE);
   const postTags = allTags.filter((tag) => tag.kind === KIND_POST);
 
+  let prevExpr = extractPrevExpression(sig);
+  if (hasMismatch && mode === MODE_RENAME && prevExpr !== undefined) {
+    prevExpr = renameIdentifiersInExpression(prevExpr, renameMap);
+  }
+
+  const baseContracts = { preTags, postTags, sourceInterface: ifaceName };
+
   if (hasMismatch && mode === MODE_RENAME) {
-    return {
+    const renamedTags = {
       preTags: applyRenameToTags(preTags, renameMap),
       postTags: applyRenameToTags(postTags, renameMap),
       sourceInterface: ifaceName,
     };
+    return prevExpr !== undefined
+      ? { ...renamedTags, prevExpression: prevExpr }
+      : renamedTags;
   }
 
-  return { preTags, postTags, sourceInterface: ifaceName };
+  return prevExpr !== undefined
+    ? { ...baseContracts, prevExpression: prevExpr }
+    : baseContracts;
 }
 
 function mergeMethodContracts(
@@ -187,11 +201,15 @@ function mergeMethodContracts(
   if (existing === undefined) {
     return { ...incoming };
   }
-  return {
+  const base = {
     preTags: [...existing.preTags, ...incoming.preTags],
     postTags: [...existing.postTags, ...incoming.postTags],
     sourceInterface: existing.sourceInterface,
   };
+  const prevExpr = existing.prevExpression ?? incoming.prevExpression;
+  return prevExpr !== undefined
+    ? { ...base, prevExpression: prevExpr }
+    : base;
 }
 
 function processInterfaceDeclaration(

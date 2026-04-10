@@ -1,13 +1,13 @@
 import typescript from 'typescript';
 import {
   buildPreCheck, buildPostCheck, buildBodyCapture, buildResultReturn,
-  parseContractExpression, buildCheckInvariantsCall,
+  parseContractExpression, buildCheckInvariantsCall, buildPrevCapture,
 } from './ast-builder';
 import { validateExpression } from './contract-validator';
 import { buildLocationName, buildKnownIdentifiers, isPublicTarget } from './node-helpers';
 import { buildParameterTypes, buildPostParamTypes, type SimpleType } from './type-helpers';
 import type { ContractTag } from './jsdoc-parser';
-import { extractContractTags } from './jsdoc-parser';
+import { extractContractTags, extractPrevExpression } from './jsdoc-parser';
 import type { InterfaceMethodContracts } from './interface-resolver';
 
 const KIND_PRE = 'pre' as const;
@@ -63,7 +63,7 @@ function filterPostTagsWithResult(
     }
     if (desc === undefined) {
       warn(
-        `[fsprepost] Contract validation warning in ${location}:`
+        `[axiom] Contract validation warning in ${location}:`
         + `\n  @post ${tag.expression}`
         + ` — 'result' used but no return type is declared; @post dropped`,
       );
@@ -71,9 +71,89 @@ function filterPostTagsWithResult(
     }
     if (desc !== RETURN_TYPE_OK) {
       warn(
-        `[fsprepost] Contract validation warning in ${location}:`
+        `[axiom] Contract validation warning in ${location}:`
         + `\n  @post ${tag.expression}`
         + ` — 'result' used but return type is '${desc}'; @post dropped`,
+      );
+      return false;
+    }
+    return true;
+  });
+}
+
+function expressionUsesPrev(expression: string): boolean {
+  try {
+    const parsed = parseContractExpression(expression);
+    let found = false;
+    function walk(node: typescript.Node): void {
+      if (!found) {
+        if (typescript.isIdentifier(node) && node.text === 'prev') {
+          found = true;
+        } else {
+          typescript.forEachChild(node, walk);
+        }
+      }
+    }
+    walk(parsed);
+    return found;
+  } catch {
+    return false;
+  }
+}
+
+function resolvePrevCapture(
+  node: typescript.FunctionLikeDeclaration,
+  reparsedNode: typescript.FunctionLikeDeclaration,
+  interfaceMethodContracts: InterfaceMethodContracts | undefined,
+  location: string,
+  warn: (msg: string) => void,
+): string | null {
+  // 1. Class-level @prev tag
+  const classPrev = extractPrevExpression(reparsedNode);
+  if (classPrev !== undefined) {
+    // Check for multiple @prev tags
+    const jsDocTags = typescript.getJSDocTags(reparsedNode);
+    const prevTags = jsDocTags.filter(
+      (tag) => tag.tagName.text.toLowerCase() === 'prev',
+    );
+    if (prevTags.length > 1) {
+      warn(
+        `[axiom] Contract validation warning in ${location}:`
+        + `\n  multiple @prev tags found — using first`,
+      );
+    }
+    return classPrev;
+  }
+
+  // 2. Interface-level @prev
+  if (interfaceMethodContracts?.prevExpression !== undefined) {
+    return interfaceMethodContracts.prevExpression;
+  }
+
+  // 3. Default for methods: shallow clone
+  if (typescript.isMethodDeclaration(node)) {
+    return '{ ...this }';
+  }
+
+  // 4. Standalone function: no default
+  return null;
+}
+
+function filterPostTagsRequiringPrev(
+  postTags: ContractTag[],
+  prevCapture: string | null,
+  location: string,
+  warn: (msg: string) => void,
+): ContractTag[] {
+  return postTags.filter((tag) => {
+    if (!expressionUsesPrev(tag.expression)) {
+      return true;
+    }
+    if (prevCapture === null) {
+      warn(
+        `[axiom] Contract validation warning in ${location}:`
+        + `\n  @post ${tag.expression}`
+        + ` — 'prev' used but no @prev capture available; @post dropped`,
       );
       return false;
     }
@@ -100,7 +180,7 @@ export function filterValidTags(
     if (errors.length > 0) {
       errors.forEach((err) => {
         warn(
-          `[fsprepost] Contract validation warning in ${location}:`
+          `[axiom] Contract validation warning in ${location}:`
           + `\n  @${kind} ${err.expression} — ${err.message}`,
         );
       });
@@ -117,6 +197,7 @@ function buildGuardedStatements(
   originalBody: typescript.Block,
   location: string,
   invariantCall: typescript.ExpressionStatement | null,
+  prevCapture: string | null,
 ): typescript.Statement[] {
   const statements: typescript.Statement[] = [];
 
@@ -125,6 +206,9 @@ function buildGuardedStatements(
   }
 
   if (postTags.length > 0 || invariantCall !== null) {
+    if (prevCapture !== null) {
+      statements.push(buildPrevCapture(prevCapture, factory));
+    }
     statements.push(buildBodyCapture(originalBody.statements, factory));
     for (const tag of postTags) {
       statements.push(buildPostCheck(tag.expression, location, factory));
@@ -248,7 +332,20 @@ function rewriteFunction(
   const preTags = filterValidTags(
     allPreInput, KIND_PRE, location, warn, preKnown, paramTypes,
   );
-  const postTagsFiltered = filterPostTagsWithResult(allPostInput, node, location, warn);
+  const postTagsWithResult = filterPostTagsWithResult(allPostInput, node, location, warn);
+
+  // Check if any post tag uses 'prev' before resolving capture
+  const anyPostUsesPrev = postTagsWithResult.some((tag) => expressionUsesPrev(tag.expression));
+
+  // Resolve prev capture only if needed
+  let prevCapture: string | null = null;
+  if (anyPostUsesPrev) {
+    prevCapture = resolvePrevCapture(
+      node, reparsedNode, interfaceMethodContracts, location, warn,
+    );
+  }
+  const postTagsFiltered = filterPostTagsRequiringPrev(postTagsWithResult, prevCapture, location, warn);
+
   const postTags = filterValidTags(
     postTagsFiltered, KIND_POST, location, warn, postKnown, postParamTypes,
   );
@@ -262,7 +359,7 @@ function rewriteFunction(
   }
 
   const newStatements = buildGuardedStatements(
-    factory, preTags, postTags, originalBody, location, invariantCall,
+    factory, preTags, postTags, originalBody, location, invariantCall, prevCapture,
   );
   return applyNewBody(factory, node, factory.createBlock(newStatements, true));
 }

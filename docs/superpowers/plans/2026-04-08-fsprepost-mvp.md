@@ -698,7 +698,7 @@ describe('transformer', () => {
     `;
     const output = transform(source);
     expect(output).toContain('ContractViolationError');
-    expect(output).toContain('fsprepost');
+    expect(output).toContain('axiom');
   });
 
   it('skips non-exported functions silently', () => {
@@ -818,7 +818,7 @@ function buildImportDeclaration(): typescript.ImportDeclaration {
         ),
       ]),
     ),
-    factory.createStringLiteral('fsprepost'),
+    factory.createStringLiteral('axiom'),
   );
 }
 
@@ -1000,7 +1000,7 @@ Expected: PASS.
 Create `test/fixtures/account.ts` (this is not a test file — it is the example that the dev build transforms):
 
 ```typescript
-import { ContractViolationError } from 'fsprepost';
+import { ContractViolationError } from 'axiom';
 
 // ContractViolationError is imported here only to satisfy the type-checker
 // when running this file directly. The transformer will inject its own import.

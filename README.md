@@ -1,13 +1,21 @@
-# fsprepost
+# FS-Axiom
 
-A TypeScript compiler transformer that reads `@pre` and `@post` JSDoc tags and injects runtime contract checks in dev builds. Release builds use plain `tsc` — no contract code is emitted.
+**Version 0.8**
+
+Agents write code faster than humans can read it. Axiom shifts the review surface: instead of auditing implementations line by line, you audit contracts. `@pre`, `@post`, and `@invariant` tags express what a function guarantees, enforced at runtime in dev builds so they can't drift from the code. The discipline runs both ways — an agent that must declare contracts before implementation is an agent that reasons about the spec first.
+
+Axiom provides a TypeScript compiler transformer that reads `@pre`, `@post`, `@invariant` and `@prev` JSDoc tags and injects runtime contract checks in dev builds. Release builds use plain `tsc` — no contract code is emitted.
+
+## Project Background
+
+Axiom is part of an exploration into how far AI-assisted development can go when building a non-trivial tools, widgets and apps. This project has been built based on a human defined architecture, co-authored functional spec and a series of interface contracts, then implemented using using Claude, Qwen and to a lesser extent Gemini.
 
 ## How it works
 
 Write contracts as JSDoc tags on public functions and methods:
 
 ```typescript
-import { ContractViolationError } from 'fsprepost';
+import { ContractViolationError } from 'axiom';
 
 export class Account {
   public balance: number = 100;
@@ -36,8 +44,10 @@ A release build (`npm run build`) strips all contract code — the output contai
 
 ## Installation
 
+Axiom is currently in version 0.8 and not available on npm yet. 
+
 ```bash
-npm install fsprepost --registry http://localhost:4873
+npm install axiom 
 ```
 
 Install `ts-patch` and patch TypeScript:
@@ -54,7 +64,7 @@ Add the transformer to your dev tsconfig:
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "plugins": [{ "transform": "fsprepost/dist/src/transformer" }]
+    "plugins": [{ "transform": "axiom/dist/src/transformer" }]
   }
 }
 ```
@@ -84,7 +94,7 @@ module.exports = {
     'ts-jest': {
       // Do NOT set isolatedModules: true — see note below
       astTransformers: {
-        before: ['fsprepost/dist/src/transformer']
+        before: ['axiom/dist/src/transformer']
       }
     }
   }
@@ -154,7 +164,7 @@ export class BankAccount {
 Invariant violations throw `InvariantViolationError`:
 
 ```typescript
-import { InvariantViolationError } from 'fsprepost';
+import { InvariantViolationError } from 'axiom';
 
 const acct = new BankAccount('Alice', 100);
 acct.withdraw(200);
@@ -162,6 +172,73 @@ acct.withdraw(200);
 ```
 
 The transformer injects a single private `#checkInvariants(location)` method on the class and calls it at each applicable exit point. Private and static methods are not instrumented.
+
+## Capturing previous state with `@prev`
+
+Use `@prev` to capture state before the function body executes, making it available as `prev` inside `@post` expressions. This enables postconditions that compare before and after state:
+
+```typescript
+export class Account {
+  public balance: number = 100;
+
+  /** @post this.balance === prev.balance + x */
+  public addToBalance(x: number): void {
+    this.balance += x;
+  }
+}
+```
+
+### Three-tier syntax
+
+| Tag | Injected code | When to use |
+|---|---|---|
+| No `@prev` tag (method only) | `const prev = ({ ...this });` | Default — shallow clone of `this` |
+| `@prev deep` | `const prev = deepSnapshot(this);` | Full clone via `structuredClone` with JSON fallback |
+| `@prev <expression>` | `const prev = (<expression>);` | User-controlled — any valid TS expression |
+
+### Methods vs standalone functions
+
+- **Methods**: If a `@post` expression references `prev` and no `@prev` tag is present, the transformer automatically injects `const prev = ({ ...this })` (shallow clone).
+- **Standalone functions**: There is no `this` to clone. If `prev` is used in `@post` without a corresponding `@prev` tag, the `@post` is dropped with a warning. Provide an explicit `@prev` expression referencing parameters:
+
+```typescript
+/** @prev { x } @post result === prev.x + 1 */
+export function foo(x: number): number { return x + 1; }
+```
+
+### Custom capture expressions
+
+Capture exactly what you need for precise comparisons:
+
+```typescript
+/** @prev { balance: this.balance } @post this.balance > prev.balance */
+public deposit(amount: number): void { this.balance += amount; }
+
+/** @prev this.balance @post this.balance === prev + amount */
+public addToBalance(amount: number): void { this.balance += amount; }
+```
+
+### Runtime utilities
+
+`snapshot` and `deepSnapshot` are exported from `axiom` and can be used directly in `@prev` expressions:
+
+```typescript
+/** @prev snapshot(this.items) */
+/** @prev deepSnapshot(this) */
+```
+
+- `snapshot(obj)` — shallow clone via spread (`{ ...obj }`)
+- `deepSnapshot(obj)` — deep clone via `structuredClone` (with `JSON.parse/stringify` fallback for environments where `structuredClone` is unavailable)
+
+> **Note:** `@prev deep` relies on `structuredClone` being available. In older environments, the fallback uses `JSON.parse(JSON.stringify(obj))`, which does not handle `undefined`, `Symbol`, functions, or circular references.
+
+### Interface inheritance
+
+`@prev` tags on interface method signatures are inherited by implementing classes, with parameter name renaming applied just like `@pre`/`@post` expressions. If both the interface and the class define `@prev`, a warning is emitted and the class-level tag takes precedence.
+
+### Known identifiers
+
+`prev` is automatically available in `@post` expressions (alongside `result`). No additional declaration is needed.
 
 ## Interface contracts
 
@@ -218,14 +295,14 @@ export class SqlUserRepository implements UserRepository {
 When the implementing class uses different parameter names than the interface signature, the transformer renames identifiers in the interface's contract expressions to match the class. A warning is emitted:
 
 ```
-[fsprepost] Parameter name mismatch in SqlUserRepository.findById:
+[axiom] Parameter name mismatch in SqlUserRepository.findById:
   interface UserRepository: 'id' → 'userId' — expression renamed
 ```
 
 To skip the contract instead of renaming, pass `interfaceParamMismatch: 'ignore'` in the transformer options:
 
 ```json
-{ "transform": "fsprepost/dist/src/transformer", "interfaceParamMismatch": "ignore" }
+{ "transform": "axiom/dist/src/transformer", "interfaceParamMismatch": "ignore" }
 ```
 
 ### What is required from you
@@ -243,7 +320,7 @@ The table below shows what works under each build/test path. The requirements di
 **The single most common mistake:** configuring `astTransformers` but also setting `isolatedModules: true`. The transformer runs but cannot see the interface file, so it silently skips interface contracts while still applying class-level contracts. The warning emitted to stderr is:
 
 ```
-[fsprepost] Interface contract resolution skipped in framework/sqlUserRepository.ts:
+[axiom] Interface contract resolution skipped in framework/sqlUserRepository.ts:
   no TypeChecker available (transpileModule mode) — class-level contracts unaffected
 ```
 
@@ -254,7 +331,7 @@ If you see this warning during Jest, check your ts-jest configuration for `isola
 If both the interface and the implementing class define contracts for the same method or invariant, both sets are applied — interface contracts first, then class contracts. A merge warning is emitted so you are aware of the overlap:
 
 ```
-[fsprepost] Contract merge warning in SqlUserRepository.findById:
+[axiom] Contract merge warning in SqlUserRepository.findById:
   both UserRepository and SqlUserRepository define @pre tags — additive merge applied
 ```
 
@@ -263,7 +340,7 @@ If both the interface and the implementing class define contracts for the same m
 All contract errors share a common base so you can catch them with a single `instanceof` check:
 
 ```typescript
-import { ContractError, ContractViolationError, InvariantViolationError } from 'fsprepost';
+import { ContractError, ContractViolationError, InvariantViolationError } from 'axiom';
 
 try {
   acct.withdraw(-1);
@@ -279,7 +356,7 @@ try {
 ## ContractViolationError
 
 ```typescript
-import { ContractViolationError } from 'fsprepost';
+import { ContractViolationError } from 'axiom';
 
 try {
   acct.withdraw(999);
@@ -298,7 +375,7 @@ try {
 For cases the transformer cannot reach (destructured parameters, enum references, complex expressions), `pre` and `post` are plain assertion functions you can call directly inside a function body:
 
 ```typescript
-import { pre, post } from 'fsprepost';
+import { pre, post } from 'axiom';
 
 export function move({ x, y }: Point, speed: number): Point {
   pre(x >= 0 && y >= 0, 'coordinates must be non-negative');
@@ -319,18 +396,18 @@ Both functions throw a `ContractViolationError` (with `type: 'PRE'` or `'POST'`)
 
 - `@pre` tags on exported functions and public class methods
 - `@post` tags — the special identifier `result` refers to the return value; requires an explicit non-void return type annotation, otherwise the `@post` is dropped with a warning
+- `@prev` tags — capture state before function execution for use in `@post` expressions via the `prev` identifier; three-tier syntax (auto shallow clone for methods, `@prev deep`, or custom expression)
 - `@invariant` tags on classes — checked after constructor and after every public method exit
 - `@pre`, `@post`, and `@invariant` tags on interfaces — propagated to all implementing classes
-- Multiple `@pre`, `@post`, and `@invariant` tags on the same target (evaluated in order)
+- Multiple `@pre`, `@post`, `@prev`, and `@invariant` tags on the same target (evaluated in order)
 - Cross-file interface resolution via the TypeScript type checker (requires full program — see [Testing with Jest](#testing-with-jest))
 - Parameter name mismatch handling between interface and class signatures (rename or ignore mode)
 - Additive merge when both interface and class define contracts for the same method
-- `this` references inside contract expressions (e.g. `amount <= this.balance`)
+- `this` and `prev` references inside contract expressions (e.g. `this.balance === prev.balance + amount`)
 - Zero contract overhead in release builds — plain `tsc` ignores JSDoc entirely
 
 ## Not yet in scope
 
-- previous capture (`@post this.balance === prev - amount`)
 - Arrow functions and function expressions
 - `async` functions and generators
 - Constructor contracts
@@ -347,7 +424,7 @@ Both functions throw a `ContractViolationError` (with `type: 'PRE'` or `'POST'`)
 
 ## Limitations
 
-Apart from the features not yet in scope, some of the existing features are limited. For instance fsprepost offers partial syntax, type and definition checking of the pre and post conditions. It does not however offer a full set of checks yet. The following is a non-exhaustive list of constructs which are currently not covered:
+Apart from the features not yet in scope, some of the existing features are limited. For instance axiom offers partial syntax, type and definition checking of the pre and post conditions. It does not however offer a full set of checks yet. The following is a non-exhaustive list of constructs which are currently not covered:
 
 **1. Destructured parameters** — binding names inside destructured parameters are not recognised as known identifiers. The contract is skipped with an unknown-identifier warning.
 ```typescript

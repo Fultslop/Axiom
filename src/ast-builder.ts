@@ -183,3 +183,29 @@ export function buildResultReturn(
 ): typescript.ReturnStatement {
   return factory.createReturnStatement(factory.createIdentifier('result'));
 }
+
+export function buildPrevCapture(
+  expression: string,
+  factory: typescript.NodeFactory = typescript.factory,
+): typescript.VariableStatement {
+  // Object literals like `{ ...this }` are ambiguous in expression position
+  // (they parse as blocks). Wrap in parens to force expression parsing.
+  const wrapped = expression.trimStart().startsWith('{')
+    ? `(${expression})`
+    : expression;
+  const parsed = parseContractExpression(wrapped);
+  const reified = reifyExpression(factory, parsed);
+
+  return factory.createVariableStatement(
+    undefined,
+    factory.createVariableDeclarationList(
+      [factory.createVariableDeclaration(
+        factory.createIdentifier('prev'),
+        undefined,
+        undefined,
+        reified,
+      )],
+      typescript.NodeFlags.Const,
+    ),
+  );
+}

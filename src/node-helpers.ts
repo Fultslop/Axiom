@@ -48,6 +48,7 @@ export function buildKnownIdentifiers(
   }
   if (includeResult) {
     names.add('result');
+    names.add('prev');
   }
   return names;
 }

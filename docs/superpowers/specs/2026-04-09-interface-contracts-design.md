@@ -83,10 +83,10 @@ EXIT:   @post checks  (interface post → class post) → #checkInvariants → r
 ### 3.4 Warning formats
 
 ```
-[fsprepost] Contract merge warning in BankAccount.withdraw:
+[axiom] Contract merge warning in BankAccount.withdraw:
   both IBankAccount and BankAccount define @pre tags — additive merge applied
 
-[fsprepost] Contract merge warning in BankAccount:
+[axiom] Contract merge warning in BankAccount:
   both IBankAccount and BankAccount define @invariant tags — additive merge applied
 ```
 
@@ -95,7 +95,7 @@ EXIT:   @post checks  (interface post → class post) → #checkInvariants → r
 When the transformer runs without a `Program` (e.g. `ts.transpileModule` / ts-jest without Program integration), cross-file interface resolution cannot be performed. A warning is emitted and class-level contracts continue to work normally:
 
 ```
-[fsprepost] Interface contract resolution skipped in <fileName>:
+[axiom] Interface contract resolution skipped in <fileName>:
   no TypeChecker available (transpileModule mode) — class-level contracts unaffected
 ```
 
@@ -112,14 +112,14 @@ Controlled by the `interfaceParamMismatch` plugin option (default `'rename'`):
 **`'rename'` (default):** Map parameter names by position (interface param 0 → class param 0). Rewrite the expression AST to substitute renamed identifiers. Emit a warning:
 
 ```
-[fsprepost] Parameter name mismatch in BankAccount.withdraw:
+[axiom] Parameter name mismatch in BankAccount.withdraw:
   interface IBankAccount uses 'amount', class uses 'value' — expression renamed
 ```
 
 **`'ignore'`:** Skip the interface `@pre` and `@post` contracts for that method. Interface `@invariant` tags are unaffected (they are class-level and do not reference method parameters). Emit a warning:
 
 ```
-[fsprepost] Parameter name mismatch in BankAccount.withdraw:
+[axiom] Parameter name mismatch in BankAccount.withdraw:
   interface IBankAccount uses 'amount', class uses 'value' — contract skipped
 ```
 
@@ -128,7 +128,7 @@ Controlled by the `interfaceParamMismatch` plugin option (default `'rename'`):
 If the interface and class methods have different parameter counts, all interface contracts for that method are skipped and a hard warning is emitted. This is treated as an error condition — no partial rename is attempted:
 
 ```
-[fsprepost] Parameter count mismatch in BankAccount.withdraw:
+[axiom] Parameter count mismatch in BankAccount.withdraw:
   interface IBankAccount has 2 parameters, class has 1 — interface contracts skipped
 ```
 

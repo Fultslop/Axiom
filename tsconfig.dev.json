@@ -1,7 +1,6 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "ignoreDeprecations": "6.0",
-    "plugins": [{ "transform": "./src/transformer.ts", "type": "raw" }]
+    "plugins": [{ "transform": "./dist/src/transformer" }]
   }
 }

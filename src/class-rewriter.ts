@@ -2,7 +2,7 @@ import typescript from 'typescript';
 import {
   buildCheckInvariantsCall, buildCheckInvariantsMethod, parseContractExpression,
 } from './ast-builder';
-import { extractInvariantExpressions, extractContractTags } from './jsdoc-parser';
+import { extractInvariantExpressions, extractContractTags, extractPrevExpression } from './jsdoc-parser';
 import { validateExpression } from './contract-validator';
 import { tryRewriteFunction, isPublicTarget } from './function-rewriter';
 import {
@@ -33,7 +33,7 @@ export function filterValidInvariants(
     if (errors.length > 0) {
       errors.forEach((err) => {
         warn(
-          `[fsprepost] Invariant validation warning in ${className}:`
+          `[axiom] Invariant validation warning in ${className}:`
           + `\n  @invariant ${err.expression} — ${err.message}`,
         );
       });
@@ -63,7 +63,7 @@ function emitMethodMergeWarnings(
     classTags.some((tag) => tag.kind === KIND_PRE)
   ) {
     warn(
-      `[fsprepost] Contract merge warning in ${location}:`
+      `[axiom] Contract merge warning in ${location}:`
       + `\n  both ${ifaceName} and ${className} define @pre tags`
       + ' — additive merge applied',
     );
@@ -73,9 +73,17 @@ function emitMethodMergeWarnings(
     classTags.some((tag) => tag.kind === KIND_POST)
   ) {
     warn(
-      `[fsprepost] Contract merge warning in ${location}:`
+      `[axiom] Contract merge warning in ${location}:`
       + `\n  both ${ifaceName} and ${className} define @post tags`
       + ' — additive merge applied',
+    );
+  }
+  const ifacePrev = ifaceContracts.prevExpression;
+  const classPrev = extractPrevExpression(reparsedNode);
+  if (ifacePrev !== undefined && classPrev !== undefined) {
+    warn(
+      `[axiom] Contract merge warning in ${location}:`
+      + `\n  both ${ifaceName} and ${className} define @prev — class-level takes precedence`,
     );
   }
 }
@@ -175,7 +183,7 @@ function resolveEffectiveInvariants(
 
   if (interfaceInvariants.length > 0 && classRaw.length > 0) {
     warn(
-      `[fsprepost] Contract merge warning in ${className}:`
+      `[axiom] Contract merge warning in ${className}:`
       + '\n  both interface and class define @invariant tags'
       + ' — additive merge applied',
     );
@@ -186,7 +194,7 @@ function resolveEffectiveInvariants(
 
   if (valid.length > 0 && hasClashingMember(node)) {
     warn(
-      `[fsprepost] Cannot inject invariants into`
+      `[axiom] Cannot inject invariants into`
       + ` ${className}: ${CHECK_INVARIANTS_NAME} already defined`,
     );
     return [];
@@ -236,7 +244,7 @@ function rewriteClass(
 
   if (checker === undefined && hasImplementsClauses(node)) {
     warn(
-      `[fsprepost] Interface contract resolution skipped in ${node.getSourceFile().fileName}:`
+      `[axiom] Interface contract resolution skipped in ${node.getSourceFile().fileName}:`
       + '\n  no TypeChecker available (transpileModule mode)'
       + ' — class-level contracts unaffected',
     );

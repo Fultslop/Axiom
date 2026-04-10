@@ -110,13 +110,13 @@ In `buildGuardedStatements` (`transformer.ts`), for each contract tag:
 
 **Warning format:**
 ```
-[fsprepost] Contract validation warning in <location>:
+[axiom] Contract validation warning in <location>:
   @<kind> <expression> — <message>
 ```
 
 Example:
 ```
-[fsprepost] Contract validation warning in Account.withdraw:
+[axiom] Contract validation warning in Account.withdraw:
   @pre x = v — assignment operator is not allowed (did you mean '==='?)
 ```
 
