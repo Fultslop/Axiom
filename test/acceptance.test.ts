@@ -45,7 +45,7 @@ function evalWithContracts(jsSource: string): Record<string, unknown> {
   const mod = { exports };
   // Strip the injected fsprepost require — ContractViolationError is passed
   // directly as a function parameter instead.
-  const stripped = jsSource.replace(/.*require\("axiom"\).*\n?/g, '');
+  const stripped = jsSource.replace(/.*require\("@fultslop\/axiom"\).*\n?/g, '');
   // eslint-disable-next-line no-new-func
   new Function('exports', 'module', 'ContractViolationError', stripped)(
     exports,
@@ -131,7 +131,7 @@ function compileES2022(source: string): string {
 function evalWithInvariants(jsSource: string): Record<string, unknown> {
   const exports: Record<string, unknown> = {};
   const mod = { exports };
-  const stripped = jsSource.replace(/.*require\("axiom"\).*\n?/g, '');
+  const stripped = jsSource.replace(/.*require\("@fultslop\/axiom"\).*\n?/g, '');
   // eslint-disable-next-line no-new-func
   new Function('exports', 'module', 'ContractViolationError', 'InvariantViolationError', stripped)(
     exports,
@@ -336,7 +336,7 @@ describe('interface contracts — @pre fires at runtime', () => {
   function evalWithAllErrors(jsSource: string): Record<string, unknown> {
     const exports: Record<string, unknown> = {};
     const mod = { exports };
-    const stripped = jsSource.replace(/.*require\("axiom"\).*\n?/g, '');
+    const stripped = jsSource.replace(/.*require\("@fultslop\/axiom"\).*\n?/g, '');
     // eslint-disable-next-line no-new-func
     new Function(
       'exports', 'module', 'ContractViolationError', 'InvariantViolationError',

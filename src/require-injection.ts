@@ -40,7 +40,7 @@ export function buildRequireStatement(
         factory.createCallExpression(
           factory.createIdentifier('require'),
           undefined,
-          [factory.createStringLiteral('axiom')],
+          [factory.createStringLiteral('@fultslop/axiom')],
         ),
       )],
       typescript.NodeFlags.Const,

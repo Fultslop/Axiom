@@ -1,5 +1,5 @@
 {
-  "name": "axiom",
+  "name": "@fultslop/axiom",
   "version": "0.8.2",
   "description": "...",
   "main": "dist/src/index.js",
