@@ -44,10 +44,10 @@ A release build (`npm run build`) strips all contract code — the output contai
 
 ## Installation
 
-Axiom is currently in version 0.8 and not available on npm yet. 
+Axiom is currently in version 0.8 and not available on npm yet. The recommended installation path for now is to install `Verdaccio` locally, build and publish it there. Then install axiom 
 
 ```bash
-npm install axiom 
+npm install fs_axiom
 ```
 
 Install `ts-patch` and patch TypeScript:
@@ -496,3 +496,78 @@ export function negate(amount: string): number { … }
 /** @pre amount !== null && amount === "zero" */  // no type-mismatch warning on the second clause
 export function pay(amount: number | null): void { … }
 ```
+
+## Agent Directives
+
+Axiom is designed to work with AI coding agents. The premise is simple: require the agent to declare contracts *before* writing any implementation. This shifts your review surface from implementation lines to contract expressions — a much smaller, more auditable surface.
+
+### The core directive
+
+Add the following to your project instructions (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, Copilot workspace instructions, or however your agent reads project context):
+
+```
+Contract-driven development with Axiom:
+- Before writing any function or method body, declare @pre, @post, and
+  @invariant JSDoc contracts that express the complete behavioural specification.
+- @pre  — conditions that must hold when the function is called
+- @post — conditions that must hold when the function returns;
+           use `result` for the return value, `prev` for pre-call state
+- @invariant — conditions that must hold after every public method on a class
+- Contracts must be valid TypeScript expressions (they are injected verbatim).
+- Do not write implementation code until contracts are written and reviewed.
+```
+
+### Why contracts first
+
+When an agent writes implementation first, you are reviewing code. When it writes contracts first, you are reviewing a spec. Contracts are:
+
+- **Short** — a handful of expressions per function, not dozens of lines
+- **Falsifiable** — the transformer enforces them at runtime in dev builds; a wrong contract breaks tests
+- **Stable** — business logic changes, implementations change, but the contract on `withdraw` (`amount > 0`, `amount <= this.balance`) rarely does
+
+Reviewing three contract expressions takes seconds. Reviewing the implementation they describe can take minutes.
+
+### Workflow
+
+Instruct the agent to follow this order for every non-trivial function or class:
+
+1. **Declare the interface** — types, method signatures, return types
+2. **Write contracts** — `@pre`, `@post`, `@invariant`, `@prev` on each method
+3. **Pause for review** — contracts are the checkpoint; get human sign-off here
+4. **Write implementation** — the agent fills in the body; contracts enforce correctness at runtime
+
+A prompt like the following works well as a per-task instruction:
+
+```
+Implement `UserRepository.save`. Before writing any body:
+1. Write the method signature with a full return type annotation.
+2. Add @pre and @post JSDoc tags that fully specify the contract.
+3. Stop and wait for my review before writing the implementation.
+```
+
+### What good contracts look like
+
+```typescript
+export interface PaymentService {
+  /**
+   * @pre amount > 0
+   * @pre this.isConnected === true
+   * @post result.status === 'ok' || result.status === 'declined'
+   * @post result.transactionId.length > 0
+   */
+  charge(amount: number, token: string): PaymentResult;
+}
+```
+
+The agent has committed to a spec. You review three expressions. Then it implements. If the implementation violates any expression, `ContractViolationError` is thrown during dev-build tests — the divergence surfaces immediately rather than in production.
+
+### Auditing agent output
+
+After implementation, your review checklist is:
+
+1. Do the `@pre` conditions match the requirements?
+2. Do the `@post` conditions fully describe the expected output?
+3. For stateful classes, do `@invariant` conditions capture the class's core integrity rules?
+4. Does the implementation pass all tests with the transformer active (`build:dev` / Jest with `astTransformers`)?
+
+If all four hold, the implementation is correct by construction for the cases the contracts cover. Implementation details are the agent's concern; correctness of the spec is yours.

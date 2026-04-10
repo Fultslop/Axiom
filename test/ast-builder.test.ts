@@ -1,5 +1,8 @@
 import typescript from 'typescript';
-import { buildPreCheck, buildBodyCapture, buildPostCheck, buildResultReturn, parseContractExpression } from '@src/ast-builder';
+import {
+  buildPreCheck, buildBodyCapture, buildPostCheck, buildResultReturn,
+  parseContractExpression, AXIOM_RESULT_VAR, AXIOM_PREV_VAR,
+} from '@src/ast-builder';
 
 function printNode(node: typescript.Node): string {
   const printer = typescript.createPrinter({ newLine: typescript.NewLineKind.LineFeed });
@@ -33,32 +36,39 @@ describe('buildPreCheck', () => {
 });
 
 describe('buildPostCheck', () => {
-  it('wraps expression in negated if and throws ContractViolationError', () => {
+  it('wraps expression in negated if and throws ContractViolationError with substituted identifiers', () => {
     const node = buildPostCheck('result >= 0', 'Account.deposit');
     const output = printNode(node);
-    expect(output).toContain('!(result >= 0)');
+    expect(output).toContain(`!(${AXIOM_RESULT_VAR} >= 0)`);
     expect(output).toContain('"POST"');
     expect(output).toContain('"result >= 0"');
     expect(output).toContain('"Account.deposit"');
   });
+
+  it('substitutes prev identifier in post check', () => {
+    const node = buildPostCheck('result === prev.x + 1', 'Account.deposit');
+    const output = printNode(node);
+    expect(output).toContain(`!(${AXIOM_RESULT_VAR} === ${AXIOM_PREV_VAR}.x + 1)`);
+    expect(output).toContain('"result === prev.x + 1"');
+  });
 });
 
 describe('buildBodyCapture', () => {
-  it('wraps original statements in an IIFE assigned to const result', () => {
+  it('wraps original statements in an IIFE assigned to const __axiom_result__', () => {
     const originalBody = parseStatement('{ x = 1; return x; }') as typescript.Block;
     const node = buildBodyCapture(originalBody.statements);
     const output = printNode(node);
-    expect(output).toContain('const result');
+    expect(output).toContain(`const ${AXIOM_RESULT_VAR}`);
     expect(output).toContain('=>');
     expect(output).toContain('x = 1');
   });
 });
 
 describe('buildResultReturn', () => {
-  it('produces return result statement', () => {
+  it('produces return __axiom_result__ statement', () => {
     const node = buildResultReturn();
     const output = printNode(node);
-    expect(output).toContain('return result');
+    expect(output).toContain(`return ${AXIOM_RESULT_VAR}`);
   });
 });
 
@@ -215,6 +225,6 @@ describe('buildBodyCapture with this keyword', () => {
     const node = buildBodyCapture(block.statements);
     const output = printNode(node);
     expect(output).toContain('this.balance');
-    expect(output).toContain('const result');
+    expect(output).toContain(`const ${AXIOM_RESULT_VAR}`);
   });
 });

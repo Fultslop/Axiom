@@ -13,11 +13,13 @@ export function post(condition: boolean, message: string): asserts condition {
 }
 
 export function snapshot<T extends object>(obj: T): T {
-  return { ...obj } as T;
+  return { ...obj };
 }
 
 export function deepSnapshot<T>(obj: T): T {
-  return typeof structuredClone !== 'undefined'
-    ? structuredClone(obj)
-    : JSON.parse(JSON.stringify(obj)) as T;
+  // eslint-disable-next-line no-restricted-syntax
+  if (typeof globalThis.structuredClone !== 'undefined') {
+    return globalThis.structuredClone(obj);
+  }
+  return JSON.parse(JSON.stringify(obj)) as T;
 }

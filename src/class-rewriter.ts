@@ -2,7 +2,11 @@ import typescript from 'typescript';
 import {
   buildCheckInvariantsCall, buildCheckInvariantsMethod, parseContractExpression,
 } from './ast-builder';
-import { extractInvariantExpressions, extractContractTags, extractPrevExpression } from './jsdoc-parser';
+import {
+  extractInvariantExpressions,
+  extractContractTags,
+  extractPrevExpression,
+} from './jsdoc-parser';
 import { validateExpression } from './contract-validator';
 import { tryRewriteFunction, isPublicTarget } from './function-rewriter';
 import {

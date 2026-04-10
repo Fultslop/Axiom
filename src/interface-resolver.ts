@@ -120,64 +120,54 @@ function applyRenameToTags(
   }));
 }
 
-function extractMethodContracts(
+function findMethodSignature(
   interfaceNode: typescript.InterfaceDeclaration,
   methodName: string,
-  classParams: string[],
-  mode: ParamMismatchMode,
-  ifaceName: string,
-  location: string,
-  warn: (msg: string) => void,
-): InterfaceMethodContracts | undefined {
-  const sig = Array.from(interfaceNode.members).find(
+): typescript.MethodSignature | undefined {
+  return Array.from(interfaceNode.members).find(
     (member): member is typescript.MethodSignature =>
       typescript.isMethodSignature(member) &&
       typescript.isIdentifier(member.name) &&
       member.name.text === methodName,
   );
-  if (sig === undefined) {
-    return undefined;
-  }
+}
 
-  const ifaceParams = getInterfaceMethodParams(sig);
-
-  if (ifaceParams.length !== classParams.length) {
-    warn(
-      `[axiom] Parameter count mismatch in ${location}:`
-      + `\n  interface ${ifaceName} has ${ifaceParams.length} parameters,`
-      + ` class has ${classParams.length} — interface contracts skipped`,
-    );
-    return { preTags: [], postTags: [], sourceInterface: ifaceName };
-  }
-
+function handleParamMismatch(
+  ifaceName: string,
+  location: string,
+  ifaceParams: string[],
+  classParams: string[],
+  mode: ParamMismatchMode,
+  warn: (msg: string) => void,
+): { renameMap: Map<string, string>; shouldSkip: boolean } {
   const renameMap = buildRenameMap(ifaceParams, classParams);
-  const hasMismatch = renameMap.size > 0;
-
-  if (hasMismatch) {
-    const pairs = Array.from(renameMap.entries())
-      .map(([from, to]) => `'${from}' → '${to}'`)
-      .join(', ');
-    const action = mode === MODE_RENAME ? ACTION_RENAMED : ACTION_SKIPPED;
-    warn(
-      `[axiom] Parameter name mismatch in ${location}:`
-      + `\n  interface ${ifaceName}: ${pairs} — ${action}`,
-    );
-    if (mode === MODE_IGNORE) {
-      return { preTags: [], postTags: [], sourceInterface: ifaceName };
-    }
+  if (renameMap.size === 0) {
+    return { renameMap, shouldSkip: false };
   }
-
-  const allTags = extractContractTagsFromNode(sig);
-  const preTags = allTags.filter((tag) => tag.kind === KIND_PRE);
-  const postTags = allTags.filter((tag) => tag.kind === KIND_POST);
-
-  let prevExpr = extractPrevExpression(sig);
-  if (hasMismatch && mode === MODE_RENAME && prevExpr !== undefined) {
-    prevExpr = renameIdentifiersInExpression(prevExpr, renameMap);
+  const pairs = Array.from(renameMap.entries())
+    .map(([from, to]) => `'${from}' → '${to}'`)
+    .join(', ');
+  const action = mode === MODE_RENAME ? ACTION_RENAMED : ACTION_SKIPPED;
+  warn(
+    `[axiom] Parameter name mismatch in ${location}:`
+    + `\n  interface ${ifaceName}: ${pairs} — ${action}`,
+  );
+  if (mode === MODE_IGNORE) {
+    return { renameMap, shouldSkip: true };
   }
+  return { renameMap, shouldSkip: false };
+}
 
+function buildContractsResult(
+  preTags: ContractTag[],
+  postTags: ContractTag[],
+  prevExpr: string | undefined,
+  renameMap: Map<string, string>,
+  hasMismatch: boolean,
+  mode: ParamMismatchMode,
+  ifaceName: string,
+): InterfaceMethodContracts {
   const baseContracts = { preTags, postTags, sourceInterface: ifaceName };
-
   if (hasMismatch && mode === MODE_RENAME) {
     const renamedTags = {
       preTags: applyRenameToTags(preTags, renameMap),
@@ -188,10 +178,55 @@ function extractMethodContracts(
       ? { ...renamedTags, prevExpression: prevExpr }
       : renamedTags;
   }
-
   return prevExpr !== undefined
     ? { ...baseContracts, prevExpression: prevExpr }
     : baseContracts;
+}
+
+function extractMethodContracts(
+  interfaceNode: typescript.InterfaceDeclaration,
+  methodName: string,
+  classParams: string[],
+  mode: ParamMismatchMode,
+  ifaceName: string,
+  location: string,
+  warn: (msg: string) => void,
+): InterfaceMethodContracts | undefined {
+  const sig = findMethodSignature(interfaceNode, methodName);
+  if (sig === undefined) {
+    return undefined;
+  }
+
+  const ifaceParams = getInterfaceMethodParams(sig);
+  if (ifaceParams.length !== classParams.length) {
+    warn(
+      `[axiom] Parameter count mismatch in ${location}:`
+      + `\n  interface ${ifaceName} has ${ifaceParams.length} parameters,`
+      + ` class has ${classParams.length} — interface contracts skipped`,
+    );
+    return { preTags: [], postTags: [], sourceInterface: ifaceName };
+  }
+
+  const { renameMap, shouldSkip } = handleParamMismatch(
+    ifaceName, location, ifaceParams, classParams, mode, warn,
+  );
+  if (shouldSkip) {
+    return { preTags: [], postTags: [], sourceInterface: ifaceName };
+  }
+
+  const hasMismatch = renameMap.size > 0;
+  const allTags = extractContractTagsFromNode(sig);
+  const preTags = allTags.filter((tag) => tag.kind === KIND_PRE);
+  const postTags = allTags.filter((tag) => tag.kind === KIND_POST);
+
+  let prevExpr = extractPrevExpression(sig);
+  if (hasMismatch && mode === MODE_RENAME && prevExpr !== undefined) {
+    prevExpr = renameIdentifiersInExpression(prevExpr, renameMap);
+  }
+
+  return buildContractsResult(
+    preTags, postTags, prevExpr, renameMap, hasMismatch, mode, ifaceName,
+  );
 }
 
 function mergeMethodContracts(

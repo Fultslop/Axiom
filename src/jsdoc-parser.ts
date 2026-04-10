@@ -10,6 +10,7 @@ const POST_TAG = 'post' as const;
 const INVARIANT_TAG = 'invariant' as const;
 const PREV_TAG = 'prev' as const;
 const TYPE_STRING = 'string' as const;
+const DEEP_MODE = 'deep' as const;
 
 function isStringComment(
   comment: typescript.JSDocTag['comment'],
@@ -92,7 +93,7 @@ export function extractPrevExpression(node: typescript.Node): string | undefined
       if (comment.length === 0) {
         return undefined;
       }
-      if (comment === 'deep') {
+      if (comment === DEEP_MODE) {
         return 'deepSnapshot(this)';
       }
       return comment;
