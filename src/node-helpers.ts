@@ -36,15 +36,32 @@ export function buildLocationName(node: typescript.FunctionLikeDeclaration): str
   return 'anonymous';
 }
 
+function extractBindingNames(
+  name: typescript.BindingName,
+  names: Set<string>,
+): void {
+  if (typescript.isIdentifier(name)) {
+    names.add(name.text);
+  } else if (typescript.isObjectBindingPattern(name)) {
+    for (const element of name.elements) {
+      extractBindingNames(element.name, names);
+    }
+  } else if (typescript.isArrayBindingPattern(name)) {
+    for (const element of name.elements) {
+      if (!typescript.isOmittedExpression(element)) {
+        extractBindingNames(element.name, names);
+      }
+    }
+  }
+}
+
 export function buildKnownIdentifiers(
   node: typescript.FunctionLikeDeclaration,
   includeResult: boolean,
 ): Set<string> {
   const names = new Set<string>(['this']);
   for (const param of node.parameters) {
-    if (typescript.isIdentifier(param.name)) {
-      names.add(param.name.text);
-    }
+    extractBindingNames(param.name, names);
   }
   if (includeResult) {
     names.add('result');

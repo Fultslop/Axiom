@@ -15,7 +15,7 @@ Axiom is part of an exploration into how far AI-assisted development can go when
 Write contracts as JSDoc tags on public functions and methods:
 
 ```typescript
-import { ContractViolationError } from 'axiom';
+import { ContractViolationError } from '@fultslop/axiom';
 
 export class Account {
   public balance: number = 100;
@@ -47,7 +47,7 @@ A release build (`npm run build`) strips all contract code — the output contai
 Axiom is currently in version 0.8 and not available on npm yet. The recommended installation path for now is to install `Verdaccio` locally, build and publish it there. Then install axiom 
 
 ```bash
-npm install fs_axiom
+npm install @fultslop/axiom
 ```
 
 Install `ts-patch` and patch TypeScript:
@@ -64,7 +64,7 @@ Add the transformer to your dev tsconfig:
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "plugins": [{ "transform": "axiom/dist/src/transformer" }]
+    "plugins": [{ "transform": "@fultslop/axiom/dist/src/transformer" }]
   }
 }
 ```
@@ -94,7 +94,7 @@ module.exports = {
     'ts-jest': {
       // Do NOT set isolatedModules: true — see note below
       astTransformers: {
-        before: ['axiom/dist/src/transformer']
+        before: ['@fultslop/axiom/dist/src/transformer']
       }
     }
   }
@@ -164,7 +164,7 @@ export class BankAccount {
 Invariant violations throw `InvariantViolationError`:
 
 ```typescript
-import { InvariantViolationError } from 'axiom';
+import { InvariantViolationError } from '@fultslop/axiom';
 
 const acct = new BankAccount('Alice', 100);
 acct.withdraw(200);
@@ -220,7 +220,7 @@ public addToBalance(amount: number): void { this.balance += amount; }
 
 ### Runtime utilities
 
-`snapshot` and `deepSnapshot` are exported from `axiom` and can be used directly in `@prev` expressions:
+`snapshot` and `deepSnapshot` are exported from `@fultslop/axiom` and can be used directly in `@prev` expressions:
 
 ```typescript
 /** @prev snapshot(this.items) */
@@ -302,7 +302,7 @@ When the implementing class uses different parameter names than the interface si
 To skip the contract instead of renaming, pass `interfaceParamMismatch: 'ignore'` in the transformer options:
 
 ```json
-{ "transform": "axiom/dist/src/transformer", "interfaceParamMismatch": "ignore" }
+{ "transform": "@fultslop/axiom/dist/src/transformer", "interfaceParamMismatch": "ignore" }
 ```
 
 ### What is required from you
@@ -340,7 +340,7 @@ If both the interface and the implementing class define contracts for the same m
 All contract errors share a common base so you can catch them with a single `instanceof` check:
 
 ```typescript
-import { ContractError, ContractViolationError, InvariantViolationError } from 'axiom';
+import { ContractError, ContractViolationError, InvariantViolationError } from '@fultslop/axiom';
 
 try {
   acct.withdraw(-1);
@@ -356,7 +356,7 @@ try {
 ## ContractViolationError
 
 ```typescript
-import { ContractViolationError } from 'axiom';
+import { ContractViolationError } from '@fultslop/axiom';
 
 try {
   acct.withdraw(999);
@@ -375,7 +375,7 @@ try {
 For cases the transformer cannot reach (destructured parameters, enum references, complex expressions), `pre` and `post` are plain assertion functions you can call directly inside a function body:
 
 ```typescript
-import { pre, post } from 'axiom';
+import { pre, post } from '@fultslop/axiom';
 
 export function move({ x, y }: Point, speed: number): Point {
   pre(x >= 0 && y >= 0, 'coordinates must be non-negative');

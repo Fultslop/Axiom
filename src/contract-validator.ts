@@ -35,7 +35,15 @@ const ASSIGNMENT_OPERATORS = new Set([
 ]);
 
 // Identifiers that are valid in any contract expression regardless of parameters.
-const GLOBAL_IDENTIFIERS = new Set(['undefined', 'NaN', 'Infinity', 'globalThis', 'arguments']);
+const GLOBAL_IDENTIFIERS = new Set([
+  'undefined', 'NaN', 'Infinity', 'globalThis', 'arguments',
+  'Object', 'Array', 'String', 'Number', 'Boolean', 'Symbol', 'BigInt',
+  'Math', 'JSON', 'Date', 'RegExp', 'Error',
+  'Promise',
+  'parseInt', 'parseFloat', 'isNaN', 'isFinite',
+  'encodeURIComponent', 'decodeURIComponent',
+  'console',
+]);
 
 function collectUnknownIdentifiers(
   node: typescript.Node,
