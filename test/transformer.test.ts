@@ -958,4 +958,70 @@ describe('transformer', () => {
       expect(output).toContain('!(JSON.stringify(obj) !== "")');
     });
   });
+
+  describe('destructured parameter binding names', () => {
+    it('injects @pre referencing destructured object binding', () => {
+      const source = `
+        /**
+         * @pre x > 0
+         */
+        export function move({ x, y }: { x: number; y: number }): void {}
+      `;
+      const warnings: string[] = [];
+      const output = transform(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      expect(output).toContain('!(x > 0)');
+    });
+
+    it('injects @pre referencing nested destructured binding', () => {
+      const source = `
+        /**
+         * @pre bbb > 0
+         */
+        export function foo({ aaa: { bbb } }: { aaa: { bbb: number } }): void {}
+      `;
+      const warnings: string[] = [];
+      const output = transform(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      expect(output).toContain('!(bbb > 0)');
+    });
+
+    it('injects @pre referencing array destructured binding', () => {
+      const source = `
+        /**
+         * @pre first > 0
+         */
+        export function head([first]: number[]): number { return first; }
+      `;
+      const warnings: string[] = [];
+      const output = transform(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      expect(output).toContain('!(first > 0)');
+    });
+
+    it('injects @pre using alias name, not original property name', () => {
+      const source = `
+        /**
+         * @pre alias > 0
+         */
+        export function bar({ original: alias }: { original: number }): void {}
+      `;
+      const warnings: string[] = [];
+      const output = transform(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      expect(output).toContain('!(alias > 0)');
+    });
+
+    it('drops @pre using original property name when aliased', () => {
+      const source = `
+        /**
+         * @pre original > 0
+         */
+        export function bar({ original: alias }: { original: number }): void {}
+      `;
+      const warnings: string[] = [];
+      transform(source, (msg) => warnings.push(msg));
+      expect(warnings.some((w) => w.includes('original'))).toBe(true);
+    });
+  });
 });
