@@ -372,7 +372,7 @@ try {
 
 ## Manual assertions
 
-For cases the transformer cannot reach (destructured parameters, enum references, complex expressions), `pre` and `post` are plain assertion functions you can call directly inside a function body:
+For cases the transformer cannot reach (enum references, complex expressions), `pre` and `post` are plain assertion functions you can call directly inside a function body:
 
 ```typescript
 import { pre, post } from '@fultslop/axiom';
@@ -404,6 +404,8 @@ Both functions throw a `ContractViolationError` (with `type: 'PRE'` or `'POST'`)
 - Parameter name mismatch handling between interface and class signatures (rename or ignore mode)
 - Additive merge when both interface and class define contracts for the same method
 - `this` and `prev` references inside contract expressions (e.g. `this.balance === prev.balance + amount`)
+- Destructured parameters — binding names from object and array destructuring are recognised as known identifiers (e.g. `{ x, y }`, `[first]`, `{ a: { b } }`, `{ original: alias }`)
+- Standard global objects — `Math`, `JSON`, `Object`, `Array`, `String`, `Number`, `Boolean`, `Symbol`, `BigInt`, `Date`, `RegExp`, `Error`, `Promise`, `parseInt`, `parseFloat`, `isNaN`, `isFinite`, `encodeURIComponent`, `decodeURIComponent`, and `console` are whitelisted
 - Zero contract overhead in release builds — plain `tsc` ignores JSDoc entirely
 
 ## Not yet in scope
@@ -426,49 +428,37 @@ Both functions throw a `ContractViolationError` (with `type: 'PRE'` or `'POST'`)
 
 Apart from the features not yet in scope, some of the existing features are limited. For instance axiom offers partial syntax, type and definition checking of the pre and post conditions. It does not however offer a full set of checks yet. The following is a non-exhaustive list of constructs which are currently not covered:
 
-**1. Destructured parameters** — binding names inside destructured parameters are not recognised as known identifiers. The contract is skipped with an unknown-identifier warning.
-```typescript
-/** @pre x > 0 */                          // warns: 'x' is not a known parameter
-public move({ x, y }: Point): void { … }
-```
-
-**2. Non-primitive parameter types** — type mismatch detection only applies to `number`, `string`, and `boolean`. Array, object, and interface types are not type-checked in contract expressions.
+**1. Non-primitive parameter types** — type mismatch detection only applies to `number`, `string`, and `boolean`. Array, object, and interface types are not type-checked in contract expressions.
 ```typescript
 /** @pre items === 42 */                   // no type-mismatch warning emitted
 export function first(items: string[]): string { … }
 ```
 
-**3. Union-typed parameters** — parameters with union types (including common patterns like `T | undefined`) are excluded from type mismatch detection because the TypeScript `TypeFlags` check does not match union types.
+**2. Union-typed parameters** — parameters with union types (including common patterns like `T | undefined`) are excluded from type mismatch detection because the TypeScript `TypeFlags` check does not match union types.
 ```typescript
 /** @pre amount === "zero" */             // no type-mismatch warning emitted
 export function pay(amount: number | undefined): void { … }
 ```
 
-**4. Enum and external constant references** — identifiers that are not function parameters (enum members, module-level constants) are flagged as unknown and the contract is skipped.
+**3. Enum and external constant references** — identifiers that are not function parameters (enum members, module-level constants) are flagged as unknown and the contract is skipped.
 ```typescript
 /** @pre status === Status.Active */      // warns: 'Status' is not a known parameter
 export function activate(status: Status): void { … }
 ```
 
-**5. Global objects not in the whitelist** — only `undefined`, `NaN`, `Infinity`, `globalThis`, and `arguments` are whitelisted. Other global objects trigger an unknown-identifier warning.
-```typescript
-/** @pre Math.abs(delta) < 1 */           // warns: 'Math' is not a known parameter
-export function nudge(delta: number): void { … }
-```
-
-**6. Template literals** — template literals are not recognised as typed string literals, so type mismatch between a typed parameter and a template literal is not detected.
+**4. Template literals** — template literals are not recognised as typed string literals, so type mismatch between a typed parameter and a template literal is not detected.
 ```typescript
 /** @pre label === `item_${id}` */        // no type-mismatch warning emitted
 export function tag(label: number, id: string): void { … }
 ```
 
-**7. Non-primitive return types** — `result` is added to the type map only when the return type is `number`, `string`, or `boolean`. For object, array, or union return types, `result` is available in the expression but type mismatch against it is not detected.
+**5. Non-primitive return types** — `result` is added to the type map only when the return type is `number`, `string`, or `boolean`. For object, array, or union return types, `result` is available in the expression but type mismatch against it is not detected.
 ```typescript
 /** @post result === "ok" */              // injected, but no type-mismatch warning emitted
 export function load(id: number): Record<string, unknown> { … }
 ```
 
-**8. `result` used without a return type annotation** — if a `@post` expression references `result` but the function has no declared return type (or is declared `void`/`never`), the `@post` is dropped with a warning. This applies in all compilation modes — no TypeChecker is required.
+**6. `result` used without a return type annotation** — if a `@post` expression references `result` but the function has no declared return type (or is declared `void`/`never`), the `@post` is dropped with a warning. This applies in all compilation modes — no TypeChecker is required.
 ```typescript
 /** @post result === "foo" */
 // warns: 'result' used but no return type is declared; @post dropped
@@ -479,19 +469,19 @@ export function noAnnotation(x: number) { return x; }
 export function voidFn(x: number): void { }
 ```
 
-**9. Multi-level property chains** — only the root object of a property access chain is scope-checked. Intermediate and leaf members are not validated.
+**7. Multi-level property chains** — only the root object of a property access chain is scope-checked. Intermediate and leaf members are not validated.
 ```typescript
 /** @pre this.config.limit > 0 */         // 'this' is scope-checked; 'config' and 'limit' are not
 public run(input: number): void { … }
 ```
 
-**10. Unary operands** — identifiers inside unary expressions are scope-checked, but type mismatch detection does not extend to the unary result.
+**8. Unary operands** — identifiers inside unary expressions are scope-checked, but type mismatch detection does not extend to the unary result.
 ```typescript
 /** @pre -amount > 0 */                   // 'amount' is scope-checked; the negated result is not type-checked
 export function negate(amount: string): number { … }
 ```
 
-**11. Compound conditions and type narrowing** — type mismatch detection examines each binary sub-expression in isolation. Type narrowing established by a sibling clause is not taken into account.
+**9. Compound conditions and type narrowing** — type mismatch detection examines each binary sub-expression in isolation. Type narrowing established by a sibling clause is not taken into account.
 ```typescript
 /** @pre amount !== null && amount === "zero" */  // no type-mismatch warning on the second clause
 export function pay(amount: number | null): void { … }

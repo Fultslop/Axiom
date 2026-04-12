@@ -1024,4 +1024,34 @@ describe('transformer', () => {
       expect(warnings.some((w) => w.includes('original'))).toBe(true);
     });
   });
+
+  describe('NoSubstitutionTemplateLiteral in contract expressions', () => {
+    it('injects @pre with a no-substitution template literal', () => {
+      const source = `
+        /**
+         * @pre label === \`hello\`
+         */
+        export function tag(label: string): void {}
+      `;
+      const warnings: string[] = [];
+      const output = transform(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      expect(output).toContain('!(label === `hello`)');
+    });
+
+    it('does not drop other contracts on a function that has a no-substitution template literal', () => {
+      const source = `
+        /**
+         * @pre count > 0
+         * @pre label === \`ok\`
+         */
+        export function run(count: number, label: string): void {}
+      `;
+      const warnings: string[] = [];
+      const output = transform(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      expect(output).toContain('!(count > 0)');
+      expect(output).toContain('!(label === `ok`)');
+    });
+  });
 });

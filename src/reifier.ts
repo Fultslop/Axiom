@@ -18,6 +18,9 @@ function reifyLiteralOrKeyword(
   if (typescript.isStringLiteral(node)) {
     return factory.createStringLiteral(node.text);
   }
+  if (typescript.isNoSubstitutionTemplateLiteral(node)) {
+    return factory.createNoSubstitutionTemplateLiteral(node.text, node.rawText);
+  }
   if (node.kind === typescript.SyntaxKind.NullKeyword) {
     return factory.createNull();
   }
