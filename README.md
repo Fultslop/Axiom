@@ -406,6 +406,9 @@ Both functions throw a `ContractViolationError` (with `type: 'PRE'` or `'POST'`)
 - `this` and `prev` references inside contract expressions (e.g. `this.balance === prev.balance + amount`)
 - Destructured parameters — binding names from object and array destructuring are recognised as known identifiers (e.g. `{ x, y }`, `[first]`, `{ a: { b } }`, `{ original: alias }`)
 - Standard global objects — `Math`, `JSON`, `Object`, `Array`, `String`, `Number`, `Boolean`, `Symbol`, `BigInt`, `Date`, `RegExp`, `Error`, `Promise`, `parseInt`, `parseFloat`, `isNaN`, `isFinite`, `encodeURIComponent`, `decodeURIComponent`, and `console` are whitelisted
+- No-substitution template literals — backtick strings without interpolation are fully supported (e.g. `` `hello` ``)
+- Enum and module-level constants — automatically resolved via TypeChecker scope analysis in full program mode; use `allowIdentifiers` option in transpileModule mode
+- `allowIdentifiers` transformer option — explicitly whitelist identifiers for environments without TypeChecker (e.g. enums, module constants)
 - Zero contract overhead in release builds — plain `tsc` ignores JSDoc entirely
 
 ## Not yet in scope
@@ -440,16 +443,17 @@ export function first(items: string[]): string { … }
 export function pay(amount: number | undefined): void { … }
 ```
 
-**3. Enum and external constant references** — identifiers that are not function parameters (enum members, module-level constants) are flagged as unknown and the contract is skipped.
+**3. Enum and external constant references in transpileModule mode** — when compiled with a full TypeScript program (TypeChecker available), enum members and module-level constants are automatically resolved via scope analysis. In `transpileModule` mode, they must be listed in the `allowIdentifiers` transformer option.
 ```typescript
-/** @pre status === Status.Active */      // warns: 'Status' is not a known parameter
+// transpileModule mode — requires allowIdentifiers option
+/** @pre status === Status.Active */      // without allowIdentifiers: ['Status'], warns and skips
 export function activate(status: Status): void { … }
 ```
 
-**4. Template literals** — template literals are not recognised as typed string literals, so type mismatch between a typed parameter and a template literal is not detected.
+**4. Interpolated template literals** — template expressions with interpolation (`` `item_${id}` ``) are not yet supported in contract expressions. No-substitution template literals (`` `hello` ``) work correctly.
 ```typescript
-/** @pre label === `item_${id}` */        // no type-mismatch warning emitted
-export function tag(label: number, id: string): void { … }
+/** @pre label === `item_${id}` */        // not yet supported — contract dropped
+export function tag(label: string, id: string): void { … }
 ```
 
 **5. Non-primitive return types** — `result` is added to the type map only when the return type is `number`, `string`, or `boolean`. For object, array, or union return types, `result` is available in the expression but type mismatch against it is not detected.

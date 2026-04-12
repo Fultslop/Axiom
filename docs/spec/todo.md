@@ -1,6 +1,5 @@
 * Export all failing acceptance tests and implement the gaps, where possible or call them out as hard constraints:
 
-- 3 #6 — Template literals (bug fix only) [template-literals](2026-04-10-template-literals-design.md) |
 | 4 | #4 — Enum and external constant references | M | [identifier-scope](2026-04-10-identifier-scope-design.md) |
 | 5 | #2 / #3 / #7 / #10 — Type checking gaps | M | [type-checking-gaps](2026-04-10-type-checking-gaps-design.md) |
 | 6 | #6 — Template literals (full reifier support) | M | [template-literals](2026-04-10-template-literals-design.md) |

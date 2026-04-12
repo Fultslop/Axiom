@@ -156,6 +156,7 @@ function rewriteMember(
   effectiveInvariants: string[],
   className: string,
   interfaceContracts: InterfaceContracts,
+  allowIdentifiers: string[] = [],
 ): { element: typescript.ClassElement; changed: boolean } {
   if (typescript.isMethodDeclaration(member) && isPublicTarget(member)) {
     const ifaceMethodContracts = lookupIfaceMethodContracts(
@@ -163,7 +164,7 @@ function rewriteMember(
     );
     const rewritten = tryRewriteFunction(
       factory, member, reparsedIndex.functions, transformed, warn,
-      checker, effectiveInvariants, ifaceMethodContracts,
+      checker, effectiveInvariants, ifaceMethodContracts, allowIdentifiers,
     );
     return {
       element: rewritten as typescript.MethodDeclaration,
@@ -216,6 +217,7 @@ function rewriteMembers(
   effectiveInvariants: string[],
   className: string,
   interfaceContracts: InterfaceContracts,
+  allowIdentifiers: string[] = [],
 ): { elements: typescript.ClassElement[]; changed: boolean } {
   let classTransformed = false;
   const newMembers: typescript.ClassElement[] = [];
@@ -223,7 +225,7 @@ function rewriteMembers(
   members.forEach((member) => {
     const result = rewriteMember(
       factory, member, reparsedIndex, transformed, warn, checker,
-      effectiveInvariants, className, interfaceContracts,
+      effectiveInvariants, className, interfaceContracts, allowIdentifiers,
     );
     if (result.changed) {
       classTransformed = true;
@@ -243,6 +245,7 @@ function rewriteClass(
   checker: typescript.TypeChecker | undefined,
   cache: Map<string, typescript.SourceFile>,
   mode: ParamMismatchMode,
+  allowIdentifiers: string[] = [],
 ): typescript.ClassDeclaration {
   const className = node.name?.text ?? 'UnknownClass';
 
@@ -265,7 +268,7 @@ function rewriteClass(
 
   const { elements: newMembers, changed: classTransformed } = rewriteMembers(
     factory, node.members, reparsedIndex, transformed, warn, checker,
-    effectiveInvariants, className, interfaceContracts,
+    effectiveInvariants, className, interfaceContracts, allowIdentifiers,
   );
 
   const finalMembers = [...newMembers];
@@ -300,10 +303,11 @@ export function tryRewriteClass(
   checker?: typescript.TypeChecker,
   cache: Map<string, typescript.SourceFile> = new Map(),
   mode: ParamMismatchMode = 'rename',
+  allowIdentifiers: string[] = [],
 ): typescript.ClassDeclaration {
   try {
     return rewriteClass(
-      factory, node, reparsedIndex, transformed, warn, checker, cache, mode,
+      factory, node, reparsedIndex, transformed, warn, checker, cache, mode, allowIdentifiers,
     );
   } catch {
     return node;

@@ -102,6 +102,38 @@ function expressionUsesPrev(expression: string): boolean {
   }
 }
 
+function buildScopeIdentifiers(
+  node: typescript.FunctionLikeDeclaration,
+  checker: typescript.TypeChecker,
+): Set<string> {
+  const scopeNode = node.parent;
+  const symbols = checker.getSymbolsInScope(
+    scopeNode,
+    typescript.SymbolFlags.Value,
+  );
+  return new Set(symbols.map((sym) => sym.name));
+}
+
+function mergeIdentifiers(
+  preKnown: Set<string>,
+  postKnown: Set<string>,
+  checker: typescript.TypeChecker | undefined,
+  node: typescript.FunctionLikeDeclaration,
+  allowIdentifiers: string[],
+): void {
+  if (checker !== undefined) {
+    const scopeIds = buildScopeIdentifiers(node, checker);
+    for (const scopeId of scopeIds) {
+      preKnown.add(scopeId);
+      postKnown.add(scopeId);
+    }
+  }
+  for (const allowedId of allowIdentifiers) {
+    preKnown.add(allowedId);
+    postKnown.add(allowedId);
+  }
+}
+
 function resolvePrevCapture(
   node: typescript.FunctionLikeDeclaration,
   reparsedNode: typescript.FunctionLikeDeclaration,
@@ -313,6 +345,7 @@ function rewriteFunction(
   checker?: typescript.TypeChecker,
   invariantExpressions: string[] = [],
   interfaceMethodContracts?: InterfaceMethodContracts,
+  allowIdentifiers: string[] = [],
 ): typescript.FunctionLikeDeclaration | null {
   const originalBody = node.body;
   if (!originalBody || !typescript.isBlock(originalBody)) {
@@ -325,6 +358,7 @@ function rewriteFunction(
   const location = buildLocationName(node);
   const preKnown = buildKnownIdentifiers(node, false);
   const postKnown = buildKnownIdentifiers(node, true);
+  mergeIdentifiers(preKnown, postKnown, checker, node, allowIdentifiers);
   const paramTypes = checker !== undefined ? buildParameterTypes(node, checker) : undefined;
   const postParamTypes = buildPostParamTypes(node, checker, paramTypes);
 
@@ -376,11 +410,12 @@ export function tryRewriteFunction(
   checker?: typescript.TypeChecker,
   invariantExpressions: string[] = [],
   interfaceMethodContracts?: InterfaceMethodContracts,
+  allowIdentifiers: string[] = [],
 ): typescript.FunctionLikeDeclaration {
   try {
     const rewritten = rewriteFunction(
       factory, node, reparsedFunctions, warn, checker,
-      invariantExpressions, interfaceMethodContracts,
+      invariantExpressions, interfaceMethodContracts, allowIdentifiers,
     );
     if (rewritten === null) {
       return node;
