@@ -102,6 +102,74 @@ function expressionUsesPrev(expression: string): boolean {
   }
 }
 
+function buildScopeIdentifiers(
+  node: typescript.FunctionLikeDeclaration,
+  checker: typescript.TypeChecker,
+): Set<string> {
+  const scopeNode = node.parent;
+  const symbols = checker.getSymbolsInScope(
+    scopeNode,
+    typescript.SymbolFlags.Value,
+  );
+  return new Set(symbols.map((sym) => sym.name));
+}
+
+function isNodeExported(node: typescript.Node): boolean {
+  const modifiers = typescript.canHaveModifiers(node)
+    ? typescript.getModifiers(node) ?? []
+    : [];
+  return modifiers.some((mod) => mod.kind === typescript.SyntaxKind.ExportKeyword);
+}
+
+function collectExportedNames(
+  sourceFile: typescript.SourceFile,
+): Set<string> {
+  const exported = new Set<string>();
+  function visit(node: typescript.Node): void {
+    if (typescript.isVariableStatement(node) && isNodeExported(node)) {
+      for (const decl of node.declarationList.declarations) {
+        if (typescript.isIdentifier(decl.name)) {
+          exported.add(decl.name.text);
+        }
+      }
+    }
+    if (
+      (typescript.isEnumDeclaration(node) ||
+      typescript.isFunctionDeclaration(node) ||
+      typescript.isClassDeclaration(node)) &&
+      isNodeExported(node) &&
+      node.name
+    ) {
+      exported.add(node.name.text);
+    }
+    typescript.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return exported;
+}
+
+function mergeIdentifiers(
+  preKnown: Set<string>,
+  postKnown: Set<string>,
+  checker: typescript.TypeChecker | undefined,
+  node: typescript.FunctionLikeDeclaration,
+  allowIdentifiers: string[],
+): Set<string> {
+  if (checker !== undefined) {
+    const scopeIds = buildScopeIdentifiers(node, checker);
+    for (const scopeId of scopeIds) {
+      preKnown.add(scopeId);
+      postKnown.add(scopeId);
+    }
+  }
+  for (const allowedId of allowIdentifiers) {
+    preKnown.add(allowedId);
+    postKnown.add(allowedId);
+  }
+  const sourceFile = node.getSourceFile();
+  return sourceFile ? collectExportedNames(sourceFile) : new Set<string>();
+}
+
 function resolvePrevCapture(
   node: typescript.FunctionLikeDeclaration,
   reparsedNode: typescript.FunctionLikeDeclaration,
@@ -199,11 +267,12 @@ function buildGuardedStatements(
   location: string,
   invariantCall: typescript.ExpressionStatement | null,
   prevCapture: string | null,
+  exportedNames: Set<string>,
 ): typescript.Statement[] {
   const statements: typescript.Statement[] = [];
 
   for (const tag of preTags) {
-    statements.push(buildPreCheck(tag.expression, location, factory));
+    statements.push(buildPreCheck(tag.expression, location, factory, exportedNames));
   }
 
   if (postTags.length > 0 || invariantCall !== null) {
@@ -212,7 +281,7 @@ function buildGuardedStatements(
     }
     statements.push(buildBodyCapture(originalBody.statements, factory));
     for (const tag of postTags) {
-      statements.push(buildPostCheck(tag.expression, location, factory));
+      statements.push(buildPostCheck(tag.expression, location, factory, exportedNames));
     }
     if (invariantCall !== null) {
       statements.push(invariantCall);
@@ -313,6 +382,7 @@ function rewriteFunction(
   checker?: typescript.TypeChecker,
   invariantExpressions: string[] = [],
   interfaceMethodContracts?: InterfaceMethodContracts,
+  allowIdentifiers: string[] = [],
 ): typescript.FunctionLikeDeclaration | null {
   const originalBody = node.body;
   if (!originalBody || !typescript.isBlock(originalBody)) {
@@ -325,6 +395,7 @@ function rewriteFunction(
   const location = buildLocationName(node);
   const preKnown = buildKnownIdentifiers(node, false);
   const postKnown = buildKnownIdentifiers(node, true);
+  const exportedNames = mergeIdentifiers(preKnown, postKnown, checker, node, allowIdentifiers);
   const paramTypes = checker !== undefined ? buildParameterTypes(node, checker) : undefined;
   const postParamTypes = buildPostParamTypes(node, checker, paramTypes);
 
@@ -362,7 +433,7 @@ function rewriteFunction(
   }
 
   const newStatements = buildGuardedStatements(
-    factory, preTags, postTags, originalBody, location, invariantCall, prevCapture,
+    factory, preTags, postTags, originalBody, location, invariantCall, prevCapture, exportedNames,
   );
   return applyNewBody(factory, node, factory.createBlock(newStatements, true));
 }
@@ -376,11 +447,12 @@ export function tryRewriteFunction(
   checker?: typescript.TypeChecker,
   invariantExpressions: string[] = [],
   interfaceMethodContracts?: InterfaceMethodContracts,
+  allowIdentifiers: string[] = [],
 ): typescript.FunctionLikeDeclaration {
   try {
     const rewritten = rewriteFunction(
       factory, node, reparsedFunctions, warn, checker,
-      invariantExpressions, interfaceMethodContracts,
+      invariantExpressions, interfaceMethodContracts, allowIdentifiers,
     );
     if (rewritten === null) {
       return node;

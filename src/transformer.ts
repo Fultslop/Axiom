@@ -21,11 +21,12 @@ function visitNode(
   checker: typescript.TypeChecker | undefined,
   reparsedCache: Map<string, typescript.SourceFile>,
   paramMismatch: ParamMismatchMode,
+  allowIdentifiers: string[],
 ): typescript.Node {
   if (typescript.isClassDeclaration(node)) {
     return tryRewriteClass(
       factory, node, reparsedIndex, transformed, warn,
-      checker, reparsedCache, paramMismatch,
+      checker, reparsedCache, paramMismatch, allowIdentifiers,
     );
   }
 
@@ -40,6 +41,9 @@ function visitNode(
       transformed,
       warn,
       checker,
+      [],
+      undefined,
+      allowIdentifiers,
     );
   }
 
@@ -47,7 +51,7 @@ function visitNode(
     node,
     (child) => visitNode(
       factory, child, context, reparsedIndex, transformed, warn,
-      checker, reparsedCache, paramMismatch,
+      checker, reparsedCache, paramMismatch, allowIdentifiers,
     ),
     context,
   );
@@ -64,6 +68,7 @@ export default function createTransformer(
   options?: {
     warn?: (msg: string) => void;
     interfaceParamMismatch?: 'rename' | 'ignore';
+    allowIdentifiers?: string[];
   },
 ): typescript.TransformerFactory<typescript.SourceFile> {
   const warn = options?.warn ?? ((msg: string): void => {
@@ -72,6 +77,7 @@ export default function createTransformer(
   const rawMode = options?.interfaceParamMismatch;
   const paramMismatch: ParamMismatchMode = rawMode === MODE_IGNORE ? 'ignore' : 'rename';
   const checker = _program?.getTypeChecker?.();
+  const allowIdentifiers = options?.allowIdentifiers ?? [];
   const reparsedCache = new Map<string, typescript.SourceFile>();
 
   return (context: typescript.TransformationContext) => {
@@ -86,7 +92,7 @@ export default function createTransformer(
         sourceFile,
         (node) => visitNode(
           factory, node, context, reparsedIndex, transformed, warn,
-          checker, reparsedCache, paramMismatch,
+          checker, reparsedCache, paramMismatch, allowIdentifiers,
         ),
         context,
       );

@@ -1054,4 +1054,95 @@ describe('transformer', () => {
       expect(output).toContain('!(label === `ok`)');
     });
   });
+
+  describe('scope identifiers (enum and module constants)', () => {
+    it('injects @pre referencing a const enum member without warning (checker mode)', () => {
+      const source = `
+        const enum Status { Active = 0, Inactive = 1 }
+        /**
+         * @pre status === Status.Active
+         */
+        export function handle(status: number): void {}
+      `;
+      const warnings: string[] = [];
+      const output = transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      expect(output).toContain('!(status === Status.Active)');
+    });
+
+    it('injects @pre referencing a module-level const without warning (checker mode)', () => {
+      const source = `
+        const MAX_SIZE = 100;
+        /**
+         * @pre amount <= MAX_SIZE
+         */
+        export function process(amount: number): void {}
+      `;
+      const warnings: string[] = [];
+      const output = transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      expect(output).toContain('!(amount <= MAX_SIZE)');
+    });
+  });
+
+  describe('allowIdentifiers transformer option', () => {
+    it('accepts Status as known identifier when listed in allowIdentifiers', () => {
+      const source = `
+        /**
+         * @pre status === Status.Active
+         */
+        export function handle(status: number): void {}
+      `;
+      const warnings: string[] = [];
+      const result = typescript.transpileModule(source, {
+        compilerOptions: {
+          target: typescript.ScriptTarget.ES2020,
+          module: typescript.ModuleKind.CommonJS,
+        },
+        transformers: {
+          before: [createTransformer(undefined, {
+            warn: (msg) => warnings.push(msg),
+            allowIdentifiers: ['Status'],
+          })],
+        },
+      });
+      expect(warnings).toHaveLength(0);
+      expect(result.outputText).toContain('!(status === Status.Active)');
+    });
+  });
+
+  describe('exported module constant runtime scoping', () => {
+    it('injects @pre referencing exported const with exports. prefix (checker mode)', () => {
+      const source = `
+        export const MAX_LIMIT = 100;
+        /**
+         * @pre x < MAX_LIMIT
+         */
+        export function moduleConstantPre(x: number): number {
+            return x;
+        }
+      `;
+      const warnings: string[] = [];
+      const output = transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      // The runtime should use exports.MAX_LIMIT, not bare MAX_LIMIT
+      expect(output).toContain('exports.MAX_LIMIT');
+      expect(output).toContain('!(x < exports.MAX_LIMIT)');
+    });
+
+    it('injects @pre referencing exported enum with exports. prefix (checker mode)', () => {
+      const source = `
+        export enum Mode { Fast = 0, Slow = 1 }
+        /**
+         * @pre mode === Mode.Fast
+         */
+        export function checkMode(mode: number): void {}
+      `;
+      const warnings: string[] = [];
+      const output = transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      expect(output).toContain('exports.Mode');
+      expect(output).toContain('!(mode === exports.Mode.Fast)');
+    });
+  });
 });

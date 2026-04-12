@@ -28,6 +28,7 @@ export function parseContractExpression(expression: string): typescript.Expressi
 function substituteContractIdentifiers(
   factory: typescript.NodeFactory,
   node: typescript.Expression,
+  exportedNames: Set<string> = new Set(),
 ): typescript.Expression {
   const visitor = (child: typescript.Node): typescript.Node => {
     if (typescript.isIdentifier(child)) {
@@ -36,6 +37,12 @@ function substituteContractIdentifiers(
       }
       if (child.text === IDENTIFIER_PREV) {
         return factory.createIdentifier(AXIOM_PREV_VAR);
+      }
+      if (exportedNames.has(child.text)) {
+        return factory.createPropertyAccessExpression(
+          factory.createIdentifier('exports'),
+          factory.createIdentifier(child.text),
+        );
       }
     }
     return typescript.visitEachChild(child, visitor, undefined);
@@ -67,6 +74,7 @@ function buildGuardIf(
   expression: string,
   body: typescript.ThrowStatement,
   substituteIdentifiers = false,
+  exportedNames: Set<string> = new Set(),
 ): typescript.IfStatement {
   const tempSourceFile = typescript.createSourceFile(
     'expr.ts',
@@ -81,9 +89,12 @@ function buildGuardIf(
     throw new Error(`Failed to parse contract expression: ${expression}`);
   }
 
-  const expressionToReify = substituteIdentifiers
-    ? substituteContractIdentifiers(factory, parsedCondition.expression)
-    : parsedCondition.expression;
+  let expressionToReify = parsedCondition.expression;
+  if (substituteIdentifiers || exportedNames.size > 0) {
+    expressionToReify = substituteContractIdentifiers(
+      factory, parsedCondition.expression, exportedNames,
+    );
+  }
   const synthesizedCondition = reifyExpression(factory, expressionToReify);
 
   return factory.createIfStatement(synthesizedCondition, body);
@@ -93,11 +104,14 @@ export function buildPreCheck(
   expression: string,
   location: string,
   factory: typescript.NodeFactory = typescript.factory,
+  exportedNames: Set<string> = new Set(),
 ): typescript.IfStatement {
   return buildGuardIf(
     factory,
     expression,
     buildThrowContractViolation(factory, PRE_CONTRACT, expression, location),
+    false,
+    exportedNames,
   );
 }
 
@@ -105,12 +119,14 @@ export function buildPostCheck(
   expression: string,
   location: string,
   factory: typescript.NodeFactory = typescript.factory,
+  exportedNames: Set<string> = new Set(),
 ): typescript.IfStatement {
   return buildGuardIf(
     factory,
     expression,
     buildThrowContractViolation(factory, POST_CONTRACT, expression, location),
     true,
+    exportedNames,
   );
 }
 
