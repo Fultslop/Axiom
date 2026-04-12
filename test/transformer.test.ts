@@ -1110,4 +1110,39 @@ describe('transformer', () => {
       expect(result.outputText).toContain('!(status === Status.Active)');
     });
   });
+
+  describe('exported module constant runtime scoping', () => {
+    it('injects @pre referencing exported const with exports. prefix (checker mode)', () => {
+      const source = `
+        export const MAX_LIMIT = 100;
+        /**
+         * @pre x < MAX_LIMIT
+         */
+        export function moduleConstantPre(x: number): number {
+            return x;
+        }
+      `;
+      const warnings: string[] = [];
+      const output = transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      // The runtime should use exports.MAX_LIMIT, not bare MAX_LIMIT
+      expect(output).toContain('exports.MAX_LIMIT');
+      expect(output).toContain('!(x < exports.MAX_LIMIT)');
+    });
+
+    it('injects @pre referencing exported enum with exports. prefix (checker mode)', () => {
+      const source = `
+        export enum Mode { Fast = 0, Slow = 1 }
+        /**
+         * @pre mode === Mode.Fast
+         */
+        export function checkMode(mode: number): void {}
+      `;
+      const warnings: string[] = [];
+      const output = transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      expect(output).toContain('exports.Mode');
+      expect(output).toContain('!(mode === exports.Mode.Fast)');
+    });
+  });
 });
