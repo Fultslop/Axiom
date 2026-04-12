@@ -1,6 +1,6 @@
 {
   "name": "@fultslop/axiom",
-  "version": "0.8.9",
+  "version": "0.8.10",
   "description": "...",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
