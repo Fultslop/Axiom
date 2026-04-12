@@ -1025,6 +1025,36 @@ describe('transformer', () => {
     });
   });
 
+  describe('TemplateExpression in contract expressions', () => {
+    it('injects @pre with an interpolated template literal', () => {
+      const source = `
+        /**
+         * @pre label === \`item_\${id}\`
+         */
+        export function tag(label: string, id: string): void {}
+      `;
+      const warnings: string[] = [];
+      const output = transform(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      expect(output).toContain('!(label === `item_${id}`)');
+    });
+
+    it('does not drop other contracts when one uses an interpolated template literal', () => {
+      const source = `
+        /**
+         * @pre count > 0
+         * @pre label === \`item_\${id}\`
+         */
+        export function run(count: number, label: string, id: string): void {}
+      `;
+      const warnings: string[] = [];
+      const output = transform(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      expect(output).toContain('!(count > 0)');
+      expect(output).toContain('!(label === `item_${id}`)');
+    });
+  });
+
   describe('NoSubstitutionTemplateLiteral in contract expressions', () => {
     it('injects @pre with a no-substitution template literal', () => {
       const source = `
@@ -1052,6 +1082,32 @@ describe('transformer', () => {
       expect(warnings).toHaveLength(0);
       expect(output).toContain('!(count > 0)');
       expect(output).toContain('!(label === `ok`)');
+    });
+  });
+
+  describe('type-mismatch detection for NoSubstitutionTemplateLiteral', () => {
+    it('warns when a number parameter is compared to a backtick string literal', () => {
+      const source = `
+        /**
+         * @pre count === \`hello\`
+         */
+        export function run(count: number): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings.some((w) => w.includes('type mismatch') && w.includes('count'))).toBe(true);
+    });
+
+    it('does not warn when a string parameter is compared to a backtick string literal', () => {
+      const source = `
+        /**
+         * @pre label === \`hello\`
+         */
+        export function tag(label: string): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
     });
   });
 

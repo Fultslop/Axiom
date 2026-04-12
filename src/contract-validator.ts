@@ -80,6 +80,9 @@ function getLiteralSimpleType(node: typescript.Node): SimpleType | undefined {
   if (typescript.isStringLiteral(node)) {
     return TYPE_STRING;
   }
+  if (typescript.isNoSubstitutionTemplateLiteral(node)) {
+    return TYPE_STRING;
+  }
   if (
     node.kind === typescript.SyntaxKind.TrueKeyword ||
     node.kind === typescript.SyntaxKind.FalseKeyword
