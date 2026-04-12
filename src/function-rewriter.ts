@@ -5,7 +5,7 @@ import {
 } from './ast-builder';
 import { validateExpression } from './contract-validator';
 import { buildLocationName, buildKnownIdentifiers, isPublicTarget } from './node-helpers';
-import { buildParameterTypes, buildPostParamTypes, type SimpleType } from './type-helpers';
+import { buildParameterTypes, buildPostParamTypes, type TypeMapValue } from './type-helpers';
 import type { ContractTag } from './jsdoc-parser';
 import { extractContractTags, extractPrevExpression } from './jsdoc-parser';
 import type { InterfaceMethodContracts } from './interface-resolver';
@@ -236,7 +236,7 @@ export function filterValidTags(
   location: string,
   warn: (msg: string) => void,
   knownIdentifiers: Set<string>,
-  paramTypes?: Map<string, SimpleType>,
+  paramTypes?: Map<string, TypeMapValue>,
 ): ContractTag[] {
   return tags.filter((tag) => {
     const errors = validateExpression(

@@ -1025,6 +1025,36 @@ describe('transformer', () => {
     });
   });
 
+  describe('TemplateExpression in contract expressions', () => {
+    it('injects @pre with an interpolated template literal', () => {
+      const source = `
+        /**
+         * @pre label === \`item_\${id}\`
+         */
+        export function tag(label: string, id: string): void {}
+      `;
+      const warnings: string[] = [];
+      const output = transform(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      expect(output).toContain('!(label === `item_${id}`)');
+    });
+
+    it('does not drop other contracts when one uses an interpolated template literal', () => {
+      const source = `
+        /**
+         * @pre count > 0
+         * @pre label === \`item_\${id}\`
+         */
+        export function run(count: number, label: string, id: string): void {}
+      `;
+      const warnings: string[] = [];
+      const output = transform(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      expect(output).toContain('!(count > 0)');
+      expect(output).toContain('!(label === `item_${id}`)');
+    });
+  });
+
   describe('NoSubstitutionTemplateLiteral in contract expressions', () => {
     it('injects @pre with a no-substitution template literal', () => {
       const source = `
@@ -1052,6 +1082,32 @@ describe('transformer', () => {
       expect(warnings).toHaveLength(0);
       expect(output).toContain('!(count > 0)');
       expect(output).toContain('!(label === `ok`)');
+    });
+  });
+
+  describe('type-mismatch detection for NoSubstitutionTemplateLiteral', () => {
+    it('warns when a number parameter is compared to a backtick string literal', () => {
+      const source = `
+        /**
+         * @pre count === \`hello\`
+         */
+        export function run(count: number): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings.some((w) => w.includes('type mismatch') && w.includes('count'))).toBe(true);
+    });
+
+    it('does not warn when a string parameter is compared to a backtick string literal', () => {
+      const source = `
+        /**
+         * @pre label === \`hello\`
+         */
+        export function tag(label: string): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
     });
   });
 
@@ -1143,6 +1199,159 @@ describe('transformer', () => {
       expect(warnings).toHaveLength(0);
       expect(output).toContain('exports.Mode');
       expect(output).toContain('!(mode === exports.Mode.Fast)');
+    });
+  });
+
+  describe('union type parameter mismatch detection', () => {
+    it('warns when number|undefined param is compared to string literal', () => {
+      const source = `
+        /**
+         * @pre amount === "zero"
+         */
+        export function pay(amount: number | undefined): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings.some((w) => w.includes('type mismatch') && w.includes('amount'))).toBe(true);
+    });
+
+    it('warns when string|null param is compared to number literal', () => {
+      const source = `
+        /**
+         * @pre label === 42
+         */
+        export function tag(label: string | null): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings.some((w) => w.includes('type mismatch') && w.includes('label'))).toBe(true);
+    });
+
+    it('does not warn for ambiguous union (number|string)', () => {
+      const source = `
+        /**
+         * @pre val === 1
+         */
+        export function foo(val: number | string): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+    });
+  });
+
+  describe('non-primitive parameter type mismatch detection', () => {
+    it('warns when array parameter is compared to number literal', () => {
+      const source = `
+        /**
+         * @pre items === 42
+         */
+        export function process(items: string[]): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(
+        warnings.some((w) => w.includes('type mismatch') && w.includes('items')),
+      ).toBe(true);
+    });
+
+    it('warns when object parameter is compared to string literal', () => {
+      const source = `
+        interface Point { x: number; y: number }
+        /**
+         * @pre pt === "hello"
+         */
+        export function move(pt: Point): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(
+        warnings.some((w) => w.includes('type mismatch') && w.includes('pt')),
+      ).toBe(true);
+    });
+
+    it('does not warn when checking a property of an object parameter', () => {
+      const source = `
+        /**
+         * @pre items.length > 0
+         */
+        export function process(items: string[]): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+    });
+  });
+
+  describe('non-primitive return type mismatch for result', () => {
+    it('warns when result is compared to number literal but return type is string', () => {
+      const source = `
+        /**
+         * @post result === 42
+         */
+        export function getName(): string { return ""; }
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(
+        warnings.some((w) => w.includes('type mismatch') && w.includes('result')),
+      ).toBe(true);
+    });
+
+    it('warns when result is compared to string literal but return type is a record', () => {
+      const source = `
+        /**
+         * @post result === "ok"
+         */
+        export function getMap(): Record<string, unknown> { return {}; }
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(
+        warnings.some((w) => w.includes('type mismatch') && w.includes('result')),
+      ).toBe(true);
+    });
+  });
+
+  describe('unary operand type-mismatch detection', () => {
+    it('warns when negated string parameter appears in numeric comparison', () => {
+      const source = `
+        /**
+         * @pre -amount > 0
+         */
+        export function pay(amount: string): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(
+        warnings.some((w) => w.includes('type mismatch') && w.includes('amount')),
+      ).toBe(true);
+    });
+
+    it('warns when negated boolean parameter is compared to number literal', () => {
+      const source = `
+        /**
+         * @pre !flag === 1
+         */
+        export function run(flag: boolean): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(
+        warnings.some((w) => w.includes('type mismatch') && w.includes('flag')),
+      ).toBe(true);
+    });
+
+    it('does not warn when negated number parameter is used in numeric comparison', () => {
+      const source = `
+        /**
+         * @pre -amount > 0
+         */
+        export function pay(amount: number): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
     });
   });
 });

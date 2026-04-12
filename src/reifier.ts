@@ -63,6 +63,19 @@ function reifyCompositeExpression(
       reifyExpression(factory, node.argumentExpression),
     );
   }
+  if (typescript.isTemplateExpression(node)) {
+    return factory.createTemplateExpression(
+      factory.createTemplateHead(node.head.text, node.head.rawText),
+      node.templateSpans.map((span) =>
+        factory.createTemplateSpan(
+          reifyExpression(factory, span.expression),
+          typescript.isTemplateMiddle(span.literal)
+            ? factory.createTemplateMiddle(span.literal.text, span.literal.rawText)
+            : factory.createTemplateTail(span.literal.text, span.literal.rawText),
+        ),
+      ),
+    );
+  }
   return undefined;
 }
 

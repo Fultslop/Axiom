@@ -406,9 +406,13 @@ Both functions throw a `ContractViolationError` (with `type: 'PRE'` or `'POST'`)
 - `this` and `prev` references inside contract expressions (e.g. `this.balance === prev.balance + amount`)
 - Destructured parameters — binding names from object and array destructuring are recognised as known identifiers (e.g. `{ x, y }`, `[first]`, `{ a: { b } }`, `{ original: alias }`)
 - Standard global objects — `Math`, `JSON`, `Object`, `Array`, `String`, `Number`, `Boolean`, `Symbol`, `BigInt`, `Date`, `RegExp`, `Error`, `Promise`, `parseInt`, `parseFloat`, `isNaN`, `isFinite`, `encodeURIComponent`, `decodeURIComponent`, and `console` are whitelisted
-- No-substitution template literals — backtick strings without interpolation are fully supported (e.g. `` `hello` ``)
+- Template literals — both no-substitution (`` `hello` ``) and interpolated (`` `item_${id}` ``) are fully supported in contract expressions
 - Enum and module-level constants — automatically resolved via TypeChecker scope analysis in full program mode; use `allowIdentifiers` option in transpileModule mode
 - `allowIdentifiers` transformer option — explicitly whitelist identifiers for environments without TypeChecker (e.g. enums, module constants)
+- Non-primitive parameter types — array, object, and interface parameters compared to a primitive literal emit a type-mismatch warning (e.g. `items === 42` where `items: string[]`)
+- Union-typed parameters — `T | null` and `T | undefined` patterns are resolved to their non-nullable constituent and type-checked; ambiguous unions such as `number | string` are skipped
+- Non-primitive return types — `result` type-checking now covers object and array return types; comparing `result` to a primitive literal emits a warning when the declared return type is non-primitive
+- Unary operand type mismatch — identifiers inside unary prefix expressions (`-x`, `+x`, `!x`) are type-checked against the literal operand of the comparison (e.g. `-amount > 0` warns when `amount` is `string`)
 - Zero contract overhead in release builds — plain `tsc` ignores JSDoc entirely
 
 ## Not yet in scope
@@ -431,38 +435,20 @@ Both functions throw a `ContractViolationError` (with `type: 'PRE'` or `'POST'`)
 
 Apart from the features not yet in scope, some of the existing features are limited. For instance axiom offers partial syntax, type and definition checking of the pre and post conditions. It does not however offer a full set of checks yet. The following is a non-exhaustive list of constructs which are currently not covered:
 
-**1. Non-primitive parameter types** — type mismatch detection only applies to `number`, `string`, and `boolean`. Array, object, and interface types are not type-checked in contract expressions.
+**1. Union-typed parameters with ambiguous types** — parameters with union types containing multiple distinct primitives (e.g. `number | string`) are excluded from type mismatch detection because the constituent types are contradictory. Nullable unions such as `T | null` and `T | undefined` are fully supported and resolve to `T`.
 ```typescript
-/** @pre items === 42 */                   // no type-mismatch warning emitted
-export function first(items: string[]): string { … }
+/** @pre val === 1 */                     // no type-mismatch warning emitted for ambiguous union
+export function foo(val: number | string): void { … }
 ```
 
-**2. Union-typed parameters** — parameters with union types (including common patterns like `T | undefined`) are excluded from type mismatch detection because the TypeScript `TypeFlags` check does not match union types.
-```typescript
-/** @pre amount === "zero" */             // no type-mismatch warning emitted
-export function pay(amount: number | undefined): void { … }
-```
-
-**3. Enum and external constant references in transpileModule mode** — when compiled with a full TypeScript program (TypeChecker available), enum members and module-level constants are automatically resolved via scope analysis. In `transpileModule` mode, they must be listed in the `allowIdentifiers` transformer option.
+**2. Enum and external constant references in transpileModule mode** — when compiled with a full TypeScript program (TypeChecker available), enum members and module-level constants are automatically resolved via scope analysis. In `transpileModule` mode, they must be listed in the `allowIdentifiers` transformer option.
 ```typescript
 // transpileModule mode — requires allowIdentifiers option
 /** @pre status === Status.Active */      // without allowIdentifiers: ['Status'], warns and skips
 export function activate(status: Status): void { … }
 ```
 
-**4. Interpolated template literals** — template expressions with interpolation (`` `item_${id}` ``) are not yet supported in contract expressions. No-substitution template literals (`` `hello` ``) work correctly.
-```typescript
-/** @pre label === `item_${id}` */        // not yet supported — contract dropped
-export function tag(label: string, id: string): void { … }
-```
-
-**5. Non-primitive return types** — `result` is added to the type map only when the return type is `number`, `string`, or `boolean`. For object, array, or union return types, `result` is available in the expression but type mismatch against it is not detected.
-```typescript
-/** @post result === "ok" */              // injected, but no type-mismatch warning emitted
-export function load(id: number): Record<string, unknown> { … }
-```
-
-**6. `result` used without a return type annotation** — if a `@post` expression references `result` but the function has no declared return type (or is declared `void`/`never`), the `@post` is dropped with a warning. This applies in all compilation modes — no TypeChecker is required.
+**3. `result` used without a return type annotation** — if a `@post` expression references `result` but the function has no declared return type (or is declared `void`/`never`), the `@post` is dropped with a warning. This applies in all compilation modes — no TypeChecker is required.
 ```typescript
 /** @post result === "foo" */
 // warns: 'result' used but no return type is declared; @post dropped
@@ -473,19 +459,13 @@ export function noAnnotation(x: number) { return x; }
 export function voidFn(x: number): void { }
 ```
 
-**7. Multi-level property chains** — only the root object of a property access chain is scope-checked. Intermediate and leaf members are not validated.
+**4. Multi-level property chains** — only the root object of a property access chain is scope-checked. Intermediate and leaf members are not validated.
 ```typescript
 /** @pre this.config.limit > 0 */         // 'this' is scope-checked; 'config' and 'limit' are not
 public run(input: number): void { … }
 ```
 
-**8. Unary operands** — identifiers inside unary expressions are scope-checked, but type mismatch detection does not extend to the unary result.
-```typescript
-/** @pre -amount > 0 */                   // 'amount' is scope-checked; the negated result is not type-checked
-export function negate(amount: string): number { … }
-```
-
-**9. Compound conditions and type narrowing** — type mismatch detection examines each binary sub-expression in isolation. Type narrowing established by a sibling clause is not taken into account.
+**5. Compound conditions and type narrowing** — type mismatch detection examines each binary sub-expression in isolation. Type narrowing established by a sibling clause is not taken into account.
 ```typescript
 /** @pre amount !== null && amount === "zero" */  // no type-mismatch warning on the second clause
 export function pay(amount: number | null): void { … }
