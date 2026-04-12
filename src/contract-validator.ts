@@ -6,10 +6,12 @@ export type ValidationErrorKind =
   | 'type-mismatch';
 
 export type SimpleType = 'number' | 'string' | 'boolean';
+export type TypeMapValue = SimpleType | 'non-primitive';
 
 const TYPE_NUMBER: SimpleType = 'number';
 const TYPE_STRING: SimpleType = 'string';
 const TYPE_BOOLEAN: SimpleType = 'boolean';
+const TYPE_NON_PRIMITIVE: TypeMapValue = 'non-primitive';
 
 export interface ValidationError {
   kind: ValidationErrorKind;
@@ -89,33 +91,63 @@ function getLiteralSimpleType(node: typescript.Node): SimpleType | undefined {
 
 function checkSideMismatch(
   paramId: typescript.Identifier | undefined,
-  paramType: SimpleType | undefined,
+  paramType: TypeMapValue | undefined,
   litType: SimpleType | undefined,
   expression: string,
   location: string,
   errors: ValidationError[],
 ): void {
-  if (paramType !== undefined && litType !== undefined && paramType !== litType) {
-    const name = paramId!.text;
-    errors.push({
-      kind: 'type-mismatch',
-      expression,
-      location,
-      message: `type mismatch: '${name}' is ${paramType} but compared to ${litType} literal`,
-    });
+  if (paramId !== undefined && paramType !== undefined && litType !== undefined) {
+    if (paramType === TYPE_NON_PRIMITIVE) {
+      errors.push({
+        kind: 'type-mismatch',
+        expression,
+        location,
+        message: `type mismatch: '${paramId.text}' is not a primitive type`
+          + ` but compared to ${litType} literal`,
+      });
+    } else if (paramType !== litType) {
+      errors.push({
+        kind: 'type-mismatch',
+        expression,
+        location,
+        message: `type mismatch: '${paramId.text}' is ${paramType}`
+          + ` but compared to ${litType} literal`,
+      });
+    }
   }
+}
+
+function extractIdentifierOperand(
+  node: typescript.Node,
+): typescript.Identifier | undefined {
+  let result: typescript.Identifier | undefined;
+  if (typescript.isIdentifier(node)) {
+    result = node;
+  } else if (
+    typescript.isPrefixUnaryExpression(node) &&
+    (
+      node.operator === typescript.SyntaxKind.MinusToken ||
+      node.operator === typescript.SyntaxKind.PlusToken ||
+      node.operator === typescript.SyntaxKind.ExclamationToken
+    ) &&
+    typescript.isIdentifier(node.operand)
+  ) {
+    result = node.operand;
+  }
+  return result;
 }
 
 function collectTypeMismatches(
   node: typescript.Node,
   expression: string,
   location: string,
-  paramTypes: Map<string, SimpleType>,
+  paramTypes: Map<string, TypeMapValue>,
   errors: ValidationError[],
 ): void {
   if (typescript.isBinaryExpression(node)) {
-    const leftId = typescript.isIdentifier(node.left) ? node.left : undefined;
-    const rightId = typescript.isIdentifier(node.right) ? node.right : undefined;
+    const leftId = extractIdentifierOperand(node.left);
+    const rightId = extractIdentifierOperand(node.right);
     const leftParamType = leftId !== undefined ? paramTypes.get(leftId.text) : undefined;
     const rightParamType = rightId !== undefined ? paramTypes.get(rightId.text) : undefined;
     const leftLit = getLiteralSimpleType(node.left);
@@ -157,7 +189,7 @@ export function validateExpression(
   expression: string,
   location: string,
   knownIdentifiers?: Set<string>,
-  paramTypes?: Map<string, SimpleType>,
+  paramTypes?: Map<string, TypeMapValue>,
 ): ValidationError[] {
   const errors: ValidationError[] = [];
   collectAssignments(node, expression, location, errors);
