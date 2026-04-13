@@ -1,10 +1,8 @@
 /**
  * Acceptance tests for spec 002, Section 10.
  *
- * Uses ts.transpileModule + the transformer directly — no ts-patch required.
- * ts-node 10.x has a known incompatibility with TypeScript 6's moduleResolution:
- * node16, which prevents the ts-patch "type: raw" loader from working. The unit
- * tests below are the canonical proof that the full pipeline is correct.
+ * Uses full TypeScript program with TypeChecker for proper contract validation.
+ * This ensures property chains are validated at compile time.
  */
 import typescript from 'typescript';
 import createTransformer from '../src/transformer';
@@ -23,7 +21,7 @@ const ACCOUNT_SOURCE = `
      * @pre amount <= this.balance
      * @post result === this.balance
      */
-    withdraw(amount) {
+    withdraw(amount: number): number {
       this.balance -= amount;
       return this.balance;
     }
@@ -31,13 +29,39 @@ const ACCOUNT_SOURCE = `
 `;
 
 function compileWithTransformer(source: string): string {
-  return typescript.transpileModule(source, {
-    compilerOptions: {
-      target: typescript.ScriptTarget.ES2020,
-      module: typescript.ModuleKind.CommonJS,
+  const fileName = 'virtual-test.ts';
+  const compilerOptions: typescript.CompilerOptions = {
+    target: typescript.ScriptTarget.ES2020,
+    module: typescript.ModuleKind.CommonJS,
+    skipLibCheck: true,
+  };
+  const defaultHost = typescript.createCompilerHost(compilerOptions);
+  const customHost: typescript.CompilerHost = {
+    ...defaultHost,
+    getSourceFile(name, languageVersion) {
+      if (name === fileName) {
+        return typescript.createSourceFile(name, source, languageVersion, true);
+      }
+      return defaultHost.getSourceFile(name, languageVersion);
     },
-    transformers: { before: [createTransformer()] },
-  }).outputText;
+    fileExists(name) {
+      return name === fileName || defaultHost.fileExists(name);
+    },
+    readFile(name) {
+      return name === fileName ? source : defaultHost.readFile(name);
+    },
+  };
+  const program = typescript.createProgram([fileName], compilerOptions, customHost);
+  const sourceFile = program.getSourceFile(fileName)!;
+  let output = '';
+  program.emit(
+    sourceFile,
+    (_, text) => { output = text; },
+    undefined,
+    false,
+    { before: [createTransformer(program)] },
+  );
+  return output;
 }
 
 function evalWithContracts(jsSource: string): Record<string, unknown> {

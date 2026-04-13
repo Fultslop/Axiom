@@ -1354,4 +1354,88 @@ describe('transformer', () => {
       expect(warnings).toHaveLength(0);
     });
   });
+
+  describe('property chain validation', () => {
+    it('drops @pre with a misspelled this-property and emits a warning', () => {
+      const source = `
+        class BankAccount {
+          balance: number = 0;
+          /**
+           * @pre this.balanc > 0
+           */
+          withdraw(amount: number): void {}
+        }
+      `;
+      const warnings: string[] = [];
+      const output = transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings.some((w) => w.includes('balanc'))).toBe(true);
+      expect(output).not.toContain('!(this.balanc > 0)');
+    });
+
+    it('injects @pre with a correctly spelled this-property without warning', () => {
+      const source = `
+        class BankAccount {
+          balance: number = 0;
+          /**
+           * @pre this.balance > 0
+           */
+          withdraw(amount: number): void {}
+        }
+      `;
+      const warnings: string[] = [];
+      const output = transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      expect(output).toContain('!(this.balance > 0)');
+    });
+
+    it('drops @pre when an intermediate chain property is missing', () => {
+      const source = `
+        interface Config { timeout: number }
+        class Service {
+          cfg: Config = { timeout: 10 };
+          /**
+           * @pre this.cfg.limit > 0
+           */
+          run(): void {}
+        }
+      `;
+      const warnings: string[] = [];
+      const output = transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings.some((w) => w.includes('limit'))).toBe(true);
+      expect(output).not.toContain('!(this.cfg.limit > 0)');
+    });
+
+    it('injects @pre when all properties in a two-level chain exist', () => {
+      const source = `
+        interface Config { timeout: number }
+        class Service {
+          cfg: Config = { timeout: 10 };
+          /**
+           * @pre this.cfg.timeout > 0
+           */
+          run(): void {}
+        }
+      `;
+      const warnings: string[] = [];
+      const output = transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      expect(output).toContain('!(this.cfg.timeout > 0)');
+    });
+
+    it('injects @pre with misspelled this-property in transpileModule mode (no checker)', () => {
+      const source = `
+        class BankAccount {
+          balance: number = 0;
+          /**
+           * @pre this.balanc > 0
+           */
+          withdraw(amount: number): void {}
+        }
+      `;
+      const warnings: string[] = [];
+      const output = transform(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+      expect(output).toContain('!(this.balanc > 0)');
+    });
+  });
 });

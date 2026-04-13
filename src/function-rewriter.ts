@@ -237,6 +237,8 @@ export function filterValidTags(
   warn: (msg: string) => void,
   knownIdentifiers: Set<string>,
   paramTypes?: Map<string, TypeMapValue>,
+  checker?: typescript.TypeChecker,
+  contextNode?: typescript.FunctionLikeDeclaration,
 ): ContractTag[] {
   return tags.filter((tag) => {
     const errors = validateExpression(
@@ -245,6 +247,8 @@ export function filterValidTags(
       location,
       knownIdentifiers,
       paramTypes,
+      checker,
+      contextNode,
     );
     if (errors.length > 0) {
       errors.forEach((err) => {
@@ -402,7 +406,7 @@ function rewriteFunction(
   const { allPreInput, allPostInput } = buildTagInputs(classTags, interfaceMethodContracts);
 
   const preTags = filterValidTags(
-    allPreInput, KIND_PRE, location, warn, preKnown, paramTypes,
+    allPreInput, KIND_PRE, location, warn, preKnown, paramTypes, checker, node,
   );
   const postTagsWithResult = filterPostTagsWithResult(allPostInput, node, location, warn);
 
@@ -421,7 +425,7 @@ function rewriteFunction(
   );
 
   const postTags = filterValidTags(
-    postTagsFiltered, KIND_POST, location, warn, postKnown, postParamTypes,
+    postTagsFiltered, KIND_POST, location, warn, postKnown, postParamTypes, checker, node,
   );
 
   const invariantCall = buildInvariantCallIfNeeded(

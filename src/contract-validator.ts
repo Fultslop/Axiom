@@ -12,6 +12,7 @@ const TYPE_NUMBER: SimpleType = 'number';
 const TYPE_STRING: SimpleType = 'string';
 const TYPE_BOOLEAN: SimpleType = 'boolean';
 const TYPE_NON_PRIMITIVE: TypeMapValue = 'non-primitive';
+const ROOT_THIS = 'this';
 
 export interface ValidationError {
   kind: ValidationErrorKind;
@@ -35,6 +36,89 @@ const ASSIGNMENT_OPERATORS = new Set([
   typescript.SyntaxKind.GreaterThanGreaterThanEqualsToken,
   typescript.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken,
 ]);
+
+interface PropertyChain {
+  root: string;
+  properties: string[];
+}
+
+function extractPropertyChain(
+  node: typescript.Node,
+): PropertyChain | undefined {
+  if (typescript.isPropertyAccessExpression(node)) {
+    const inner = extractPropertyChain(node.expression);
+    if (inner === undefined) {
+      return undefined;
+    }
+    return { root: inner.root, properties: [...inner.properties, node.name.text] };
+  }
+  if (typescript.isIdentifier(node)) {
+    return { root: node.text, properties: [] };
+  }
+  if (node.kind === typescript.SyntaxKind.ThisKeyword) {
+    return { root: ROOT_THIS, properties: [] };
+  }
+  return undefined;
+}
+
+function resolveRootType(
+  rootName: string,
+  checker: typescript.TypeChecker,
+  contextNode: typescript.FunctionLikeDeclaration,
+): typescript.Type | undefined {
+  if (rootName === ROOT_THIS) {
+    if (typescript.isClassDeclaration(contextNode.parent)) {
+      const classType = checker.getTypeAtLocation(contextNode.parent);
+      if (classType !== undefined) {
+        return classType;
+      }
+    }
+    return undefined;
+  }
+  for (const param of contextNode.parameters) {
+    if (typescript.isIdentifier(param.name) && param.name.text === rootName) {
+      return checker.getTypeAtLocation(param);
+    }
+  }
+  return undefined;
+}
+
+function collectDeepPropertyErrors(
+  node: typescript.Node,
+  expression: string,
+  location: string,
+  checker: typescript.TypeChecker,
+  contextNode: typescript.FunctionLikeDeclaration,
+  errors: ValidationError[],
+): void {
+  if (typescript.isPropertyAccessExpression(node)) {
+    const chain = extractPropertyChain(node);
+    if (chain !== undefined && chain.properties.length > 0) {
+      const rootType = resolveRootType(chain.root, checker, contextNode);
+      if (rootType !== undefined) {
+        let currentType: typescript.Type = rootType;
+        for (const prop of chain.properties) {
+          const symbol = checker.getPropertyOfType(currentType, prop);
+          if (symbol === undefined) {
+            errors.push({
+              kind: 'unknown-identifier',
+              expression,
+              location,
+              message: `property '${prop}' does not exist`
+                + ` on type '${checker.typeToString(currentType)}'`,
+            });
+            break;
+          }
+          currentType = checker.getTypeOfSymbol(symbol);
+        }
+      }
+    }
+    // Don't recursively check child PropertyAccessExpressions - we already validated the full chain
+  } else {
+    typescript.forEachChild(node, (child) =>
+      collectDeepPropertyErrors(child, expression, location, checker, contextNode, errors));
+  }
+}
 
 // Identifiers that are valid in any contract expression regardless of parameters.
 const GLOBAL_IDENTIFIERS = new Set([
@@ -193,6 +277,8 @@ export function validateExpression(
   location: string,
   knownIdentifiers?: Set<string>,
   paramTypes?: Map<string, TypeMapValue>,
+  checker?: typescript.TypeChecker,
+  contextNode?: typescript.FunctionLikeDeclaration,
 ): ValidationError[] {
   const errors: ValidationError[] = [];
   collectAssignments(node, expression, location, errors);
@@ -201,6 +287,9 @@ export function validateExpression(
   }
   if (paramTypes !== undefined) {
     collectTypeMismatches(node, expression, location, paramTypes, errors);
+  }
+  if (checker !== undefined && contextNode !== undefined) {
+    collectDeepPropertyErrors(node, expression, location, checker, contextNode, errors);
   }
   return errors;
 }
