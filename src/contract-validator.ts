@@ -96,7 +96,7 @@ function collectDeepPropertyErrors(
     if (chain !== undefined && chain.properties.length > 0) {
       const rootType = resolveRootType(chain.root, checker, contextNode);
       if (rootType !== undefined) {
-        let currentType: typescript.Type = rootType;
+        let currentType: typescript.Type = checker.getNonNullableType(rootType);
         for (const prop of chain.properties) {
           const symbol = checker.getPropertyOfType(currentType, prop);
           if (symbol === undefined) {
@@ -109,7 +109,7 @@ function collectDeepPropertyErrors(
             });
             break;
           }
-          currentType = checker.getTypeOfSymbol(symbol);
+          currentType = checker.getNonNullableType(checker.getTypeOfSymbol(symbol));
         }
       }
     }

@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.0-alpha.3] - 2026-04-13
+
+### Fixed
+- Optional chaining false-positive — `@pre obj?.value > 0` on a nullable parameter (`T | null`) no longer emits a spurious "property does not exist" warning; nullability is stripped before each step of the property chain walk
+- Misuse detection — `@pre`/`@post` on constructors, arrow functions, function expressions, non-exported/nested function declarations, and class declarations now emit targeted `[axiom] Warning:` diagnostics; `@invariant` on non-class nodes is similarly reported
+
 ## [0.9.0-alpha.1] - 2026-04-13
 
 ### Added
