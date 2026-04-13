@@ -113,9 +113,11 @@ function collectDeepPropertyErrors(
         }
       }
     }
+    // Don't recursively check child PropertyAccessExpressions - we already validated the full chain
+  } else {
+    typescript.forEachChild(node, (child) =>
+      collectDeepPropertyErrors(child, expression, location, checker, contextNode, errors));
   }
-  typescript.forEachChild(node, (child) =>
-    collectDeepPropertyErrors(child, expression, location, checker, contextNode, errors));
 }
 
 // Identifiers that are valid in any contract expression regardless of parameters.
