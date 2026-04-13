@@ -1,7 +1,7 @@
 {
   "name": "@fultslop/axiom",
-  "version": "0.8.12",
-  "description": "...",
+  "version": "0.9.0-alpha.1",
+  "description": "Contract-driven development for TypeScript — @pre, @post, and @invariant JSDoc tags enforced at runtime in dev builds, stripped in release builds.",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
   "files": [
@@ -22,12 +22,28 @@
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run typecheck && npm run lint && npm run test && npm run build"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "typescript",
+    "contracts",
+    "design-by-contract",
+    "transformer",
+    "ts-patch",
+    "compiler-plugin",
+    "preconditions",
+    "postconditions",
+    "invariants",
+    "ai-agents"
+  ],
+  "author": "Fultslop",
+  "license": "MIT",
   "type": "commonjs",
-  "publishConfig": {
-    "registry": "http://localhost:4873"
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Fultslop/axiom.git"
+  },
+  "homepage": "https://github.com/Fultslop/axiom#readme",
+  "bugs": {
+    "url": "https://github.com/Fultslop/axiom/issues"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.5.0",

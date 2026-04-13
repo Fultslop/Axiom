@@ -1,6 +1,10 @@
 # FS-Axiom
 
-**Version 0.8**
+**Version 0.9 (alpha)**
+
+[![npm](https://img.shields.io/npm/v/@fultslop/axiom)](https://www.npmjs.com/package/@fultslop/axiom)
+[![license](https://img.shields.io/npm/l/@fultslop/axiom)](LICENSE)
+[![CI](https://github.com/Fultslop/axiom/actions/workflows/ci.yml/badge.svg)](https://github.com/Fultslop/axiom/actions/workflows/ci.yml)
 
 Agents write code faster than humans can read it. Axiom shifts the review surface: instead of auditing implementations line by line, you audit contracts. `@pre`, `@post`, and `@invariant` tags express what a function guarantees, enforced at runtime in dev builds so they can't drift from the code. The discipline runs both ways — an agent that must declare contracts before implementation is an agent that reasons about the spec first.
 
@@ -43,8 +47,6 @@ acct.withdraw(-1);
 A release build (`npm run build`) strips all contract code — the output contains no references to `ContractViolationError`.
 
 ## Installation
-
-Axiom is currently in version 0.8 and not available on npm yet. The recommended installation path for now is to install `Verdaccio` locally, build and publish it there. Then install axiom 
 
 ```bash
 npm install @fultslop/axiom
@@ -545,3 +547,32 @@ After implementation, your review checklist is:
 4. Does the implementation pass all tests with the transformer active (`build:dev` / Jest with `astTransformers`)?
 
 If all four hold, the implementation is correct by construction for the cases the contracts cover. Implementation details are the agent's concern; correctness of the spec is yours.
+
+## Local development
+
+To build and test axiom locally, or to consume it from another local project before it is published, use [Verdaccio](https://verdaccio.org).
+
+Start Verdaccio (if not running):
+```bash
+npx verdaccio
+```
+
+Log in (first time):
+```bash
+npm adduser --registry http://localhost:4873
+```
+
+Publish locally:
+```bash
+npm publish --registry http://localhost:4873
+```
+
+Consume from another local project:
+```bash
+npm install @fultslop/axiom --registry http://localhost:4873
+```
+
+Or add to the consuming project's `.npmrc`:
+```
+registry=http://localhost:4873
+```
