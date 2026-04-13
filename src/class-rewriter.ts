@@ -6,6 +6,7 @@ import {
   extractInvariantExpressions,
   extractContractTags,
   extractPrevExpression,
+  extractContractTagsFromNode,
 } from './jsdoc-parser';
 import { validateExpression } from './contract-validator';
 import { tryRewriteFunction, isPublicTarget } from './function-rewriter';
@@ -171,8 +172,19 @@ function rewriteMember(
       changed: rewritten !== member,
     };
   }
-  if (typescript.isConstructorDeclaration(member) && effectiveInvariants.length > 0) {
-    return { element: rewriteConstructor(factory, member, className), changed: true };
+  if (typescript.isConstructorDeclaration(member)) {
+    const constructorTags = extractContractTagsFromNode(member);
+    if (constructorTags.length > 0) {
+      warn(
+        `[axiom] Warning: @pre/@post on constructors is not supported`
+        + ` — use @invariant on the class or call pre()/post() manually`
+        + ` inside the constructor body (in ${className}.constructor)`,
+      );
+    }
+    if (effectiveInvariants.length > 0) {
+      return { element: rewriteConstructor(factory, member, className), changed: true };
+    }
+    return { element: member, changed: false };
   }
   return { element: member, changed: false };
 }
@@ -236,6 +248,23 @@ function rewriteMembers(
   return { elements: newMembers, changed: classTransformed };
 }
 
+function emitClassBodyWarning(
+  node: typescript.ClassDeclaration,
+  reparsedIndex: ReparsedIndex,
+  className: string,
+  warn: (msg: string) => void,
+): void {
+  const classContractTags = extractContractTagsFromNode(node);
+  const reparsedClass = reparsedIndex.classes.get(node.pos) ?? node;
+  const reparsedClassContractTags = extractContractTagsFromNode(reparsedClass);
+  if (classContractTags.length > 0 || reparsedClassContractTags.length > 0) {
+    warn(
+      `[axiom] Warning: @pre/@post on a class declaration is not supported`
+      + ` — annotate individual methods instead (in ${className})`,
+    );
+  }
+}
+
 function rewriteClass(
   factory: typescript.NodeFactory,
   node: typescript.ClassDeclaration,
@@ -248,6 +277,8 @@ function rewriteClass(
   allowIdentifiers: string[] = [],
 ): typescript.ClassDeclaration {
   const className = node.name?.text ?? 'UnknownClass';
+
+  emitClassBodyWarning(node, reparsedIndex, className, warn);
 
   if (checker === undefined && hasImplementsClauses(node)) {
     warn(

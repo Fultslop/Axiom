@@ -4,8 +4,84 @@ import { tryRewriteFunction, isPublicTarget } from './function-rewriter';
 import { tryRewriteClass } from './class-rewriter';
 import { buildRequireStatement } from './require-injection';
 import type { ParamMismatchMode } from './interface-resolver';
+import {
+  extractContractTagsFromNode,
+  extractInvariantExpressions,
+} from './jsdoc-parser';
 
 const MODE_IGNORE = 'ignore' as const;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function resolveDisplayName(node: typescript.Node): string {
+  if (
+    typescript.isVariableDeclaration(node.parent) &&
+    typescript.isIdentifier(node.parent.name)
+  ) {
+    return node.parent.name.text;
+  }
+  return '(anonymous)';
+}
+
+function extractNodeName(node: typescript.Node): string {
+  if (
+    typescript.isFunctionDeclaration(node) ||
+    typescript.isInterfaceDeclaration(node) ||
+    typescript.isClassDeclaration(node)
+  ) {
+    return (node as { name?: typescript.Identifier }).name?.text ?? '(anonymous)';
+  }
+  if (typescript.isVariableStatement(node)) {
+    const firstDecl = node.declarationList.declarations[0];
+    if (firstDecl && typescript.isIdentifier(firstDecl.name)) {
+      return firstDecl.name.text;
+    }
+  }
+  return '(anonymous)';
+}
+
+function emitMisuseWarnings(node: typescript.Node, warn: (msg: string) => void): void {
+  if (!typescript.isClassDeclaration(node)) {
+    const invariantExprs = extractInvariantExpressions(node);
+    if (invariantExprs.length > 0) {
+      const nodeName = extractNodeName(node);
+      warn(
+        '[axiom] Warning: @invariant is only supported on class declarations'
+        + ` — tag has no effect (in ${nodeName})`,
+      );
+    }
+  }
+}
+
+function emitUnsupportedClosureWarning(
+  node: typescript.FunctionDeclaration,
+  warn: (msg: string) => void,
+): void {
+  const contractTags = extractContractTagsFromNode(node);
+  if (contractTags.length > 0) {
+    const funcName = node.name?.text ?? '(anonymous)';
+    warn(
+      '[axiom] Warning: @pre/@post on arrow functions, function expressions, and closures'
+      + ` is not supported — contracts were not injected (in ${funcName})`,
+    );
+  }
+}
+
+function emitUnsupportedExpressionWarning(
+  node: typescript.ArrowFunction | typescript.FunctionExpression,
+  warn: (msg: string) => void,
+): void {
+  const contractTags = extractContractTagsFromNode(node);
+  if (contractTags.length > 0) {
+    const displayName = resolveDisplayName(node);
+    warn(
+      '[axiom] Warning: @pre/@post on arrow functions, function expressions, and closures'
+      + ` is not supported — contracts were not injected (in ${displayName})`,
+    );
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Node visitor
@@ -30,11 +106,13 @@ function visitNode(
     );
   }
 
+  emitMisuseWarnings(node, warn);
+
   if (
     typescript.isFunctionDeclaration(node) &&
     isPublicTarget(node as typescript.FunctionLikeDeclaration)
   ) {
-    return tryRewriteFunction(
+    const rewritten = tryRewriteFunction(
       factory,
       node as typescript.FunctionLikeDeclaration,
       reparsedIndex.functions,
@@ -45,6 +123,25 @@ function visitNode(
       undefined,
       allowIdentifiers,
     );
+    return typescript.visitEachChild(
+      rewritten,
+      (child) => visitNode(
+        factory, child, context, reparsedIndex, transformed, warn,
+        checker, reparsedCache, paramMismatch, allowIdentifiers,
+      ),
+      context,
+    );
+  }
+
+  if (
+    typescript.isFunctionDeclaration(node) &&
+    !isPublicTarget(node as typescript.FunctionLikeDeclaration)
+  ) {
+    emitUnsupportedClosureWarning(node, warn);
+  }
+
+  if (typescript.isArrowFunction(node) || typescript.isFunctionExpression(node)) {
+    emitUnsupportedExpressionWarning(node, warn);
   }
 
   return typescript.visitEachChild(
