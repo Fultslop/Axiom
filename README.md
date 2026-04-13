@@ -416,12 +416,11 @@ Both functions throw a `ContractViolationError` (with `type: 'PRE'` or `'POST'`)
 - Non-primitive return types — `result` type-checking now covers object and array return types; comparing `result` to a primitive literal emits a warning when the declared return type is non-primitive
 - Unary operand type mismatch — identifiers inside unary prefix expressions (`-x`, `+x`, `!x`) are type-checked against the literal operand of the comparison (e.g. `-amount > 0` warns when `amount` is `string`)
 - Zero contract overhead in release builds — plain `tsc` ignores JSDoc entirely
+- Misuse detection — `@pre`/`@post` on constructors, arrow functions, function expressions, non-exported or nested function declarations, and class declarations all emit targeted `[axiom] Warning:` diagnostics; `@invariant` on non-class nodes is similarly reported
 
 ## Not yet in scope
 
-- Arrow functions and function expressions
 - `async` functions and generators
-- Constructor contracts
 - Inherited contracts from base classes (interface contracts are supported; class-to-class inheritance is not)
 - Integration with `ts-patch` via the `type: raw` loader under TypeScript 6 + `moduleResolution: node16` (a known ts-node 10.x incompatibility; tests use `ts.transpileModule` directly as the canonical verification path)
 

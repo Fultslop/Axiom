@@ -6,7 +6,7 @@ Each entry: priority, plan file, suggested git commit message.
 
 ---
 
-1. `2026-04-13-misuse-detection.md` — `feat: warn on misapplied @pre/@post/@invariant tags`
+1. [done]`2026-04-13-misuse-detection.md` — `feat: warn on misapplied @pre/@post/@invariant tags`
 2. `2026-04-13-optional-chaining.md` — `fix: strip nullability when validating optional chain property access`
 3. `2026-04-13-compound-conditions.md` — `feat: typeof guard narrowing in &&-compound contract expressions`
 4. `2026-04-13-constructor-contracts.md` — `feat: support @pre/@post contracts on constructors`

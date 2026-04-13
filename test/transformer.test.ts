@@ -52,6 +52,10 @@ function transformWithProgram(source: string, warn?: (msg: string) => void): str
   return output;
 }
 
+function transpileWithWarn(source: string, warn: (msg: string) => void): string {
+  return transform(source, warn);
+}
+
 describe('transformer', () => {
   it('leaves functions without contract tags unchanged', () => {
     const source = `
@@ -1355,6 +1359,64 @@ describe('transformer', () => {
     });
   });
 
+  describe('@pre/@post on constructor', () => {
+    it('warns when constructor has @pre tag', () => {
+      const source = `
+        export class Counter {
+          /** @pre x > 0 */
+          constructor(private x: number) {}
+        }
+      `;
+      const warnings: string[] = [];
+      transpileWithWarn(source, (msg) => warnings.push(msg));
+      expect(
+        warnings.some((w) => w.includes('constructors is not supported') && w.includes('Counter')),
+      ).toBe(true);
+    });
+
+    it('warns when constructor has @post tag', () => {
+      const source = `
+        export class Box {
+          /** @post result !== null */
+          constructor(public value: string) {}
+        }
+      `;
+      const warnings: string[] = [];
+      transpileWithWarn(source, (msg) => warnings.push(msg));
+      expect(
+        warnings.some((w) => w.includes('constructors is not supported') && w.includes('Box')),
+      ).toBe(true);
+    });
+
+    it('does not warn for @pre on a regular method', () => {
+      const source = `
+        export class Calc {
+          /** @pre x > 0 */
+          double(x: number): number { return x * 2; }
+        }
+      `;
+      const warnings: string[] = [];
+      transpileWithWarn(source, (msg) => warnings.push(msg));
+      expect(warnings.some((w) => w.includes('constructors is not supported'))).toBe(false);
+    });
+
+    it('injects invariant into constructor AND warns about @pre on constructor', () => {
+      const source = `
+        /** @invariant this.x > 0 */
+        export class Guarded {
+          /** @pre x > 0 */
+          constructor(private x: number) {}
+        }
+      `;
+      const warnings: string[] = [];
+      const output = transpileWithWarn(source, (msg) => warnings.push(msg));
+      expect(output).toContain('checkInvariants');
+      expect(
+        warnings.some((w) => w.includes('constructors is not supported') && w.includes('Guarded')),
+      ).toBe(true);
+    });
+  });
+
   describe('property chain validation', () => {
     it('drops @pre with a misspelled this-property and emits a warning', () => {
       const source = `
@@ -1436,6 +1498,170 @@ describe('transformer', () => {
       const output = transform(source, (msg) => warnings.push(msg));
       expect(warnings).toHaveLength(0);
       expect(output).toContain('!(this.balanc > 0)');
+    });
+  });
+
+  describe('@pre/@post on arrow function or function expression', () => {
+    it('warns when named arrow function has @pre tag', () => {
+      const source = `
+        const foo = /** @pre x > 0 */ (x: number): number => x + 1;
+      `;
+      const warnings: string[] = [];
+      transpileWithWarn(source, (msg) => warnings.push(msg));
+      expect(
+        warnings.some((w) => w.includes('arrow functions') && w.includes('foo')),
+      ).toBe(true);
+    });
+
+    it('warns when named function expression has @post tag', () => {
+      const source = `
+        const bar = /** @post result > 0 */ function(x: number): number { return x; };
+      `;
+      const warnings: string[] = [];
+      transpileWithWarn(source, (msg) => warnings.push(msg));
+      expect(
+        warnings.some((w) => w.includes('function expressions') && w.includes('bar')),
+      ).toBe(true);
+    });
+
+    it('warns with (anonymous) for anonymous IIFE', () => {
+      const source = `
+        (/** @pre x > 0 */ (x: number): number => x)();
+      `;
+      const warnings: string[] = [];
+      transpileWithWarn(source, (msg) => warnings.push(msg));
+      expect(
+        warnings.some((w) => w.includes('arrow functions') && w.includes('(anonymous)')),
+      ).toBe(true);
+    });
+
+    it('does not warn for named exported function declaration with @pre', () => {
+      const source = `
+        /** @pre x > 0 */
+        export function add(x: number): number { return x + 1; }
+      `;
+      const warnings: string[] = [];
+      transpileWithWarn(source, (msg) => warnings.push(msg));
+      expect(warnings.some((w) => w.includes('arrow functions'))).toBe(false);
+      expect(warnings.some((w) => w.includes('function expressions'))).toBe(false);
+    });
+  });
+
+  describe('@pre/@post on nested or non-exported function declaration', () => {
+    it('warns for unexported top-level function with @pre', () => {
+      const source = `
+        /** @pre x > 0 */
+        function helper(x: number): number { return x; }
+      `;
+      const warnings: string[] = [];
+      transpileWithWarn(source, (msg) => warnings.push(msg));
+      expect(
+        warnings.some((w) => w.includes('closures') && w.includes('helper')),
+      ).toBe(true);
+    });
+
+    it('warns for function declaration nested inside another function', () => {
+      const source = `
+        export function outer(x: number): number {
+          /** @pre x > 0 */
+          function inner(x: number): number { return x; }
+          return inner(x);
+        }
+      `;
+      const warnings: string[] = [];
+      transpileWithWarn(source, (msg) => warnings.push(msg));
+      expect(
+        warnings.some((w) => w.includes('closures') && w.includes('inner')),
+      ).toBe(true);
+    });
+  });
+
+  describe('@pre/@post on a class body', () => {
+    it('warns when @pre JSDoc is on the class declaration itself', () => {
+      const source = `
+        /** @pre this.x > 0 */
+        export class Widget {
+          constructor(public x: number) {}
+        }
+      `;
+      const warnings: string[] = [];
+      transpileWithWarn(source, (msg) => warnings.push(msg));
+      expect(
+        warnings.some(
+          (w) => w.includes('class declaration is not supported') && w.includes('Widget'),
+        ),
+      ).toBe(true);
+    });
+
+    it('class-level warning emitted AND method contracts injected normally', () => {
+      const source = `
+        /** @pre this.x > 0 */
+        export class Dual {
+          constructor(public x: number) {}
+          /** @pre val > 0 */
+          set(val: number): void { this.x = val; }
+        }
+      `;
+      const warnings: string[] = [];
+      const output = transpileWithWarn(source, (msg) => warnings.push(msg));
+      expect(
+        warnings.some((w) => w.includes('class declaration is not supported') && w.includes('Dual')),
+      ).toBe(true);
+      expect(output).toContain('ContractViolationError');
+    });
+  });
+
+  describe('@invariant on a non-class node', () => {
+    it('warns when exported function has @invariant tag', () => {
+      const source = `
+        /** @invariant x > 0 */
+        export function process(x: number): number { return x; }
+      `;
+      const warnings: string[] = [];
+      transpileWithWarn(source, (msg) => warnings.push(msg));
+      expect(
+        warnings.some(
+          (w) => w.includes('only supported on class declarations') && w.includes('process'),
+        ),
+      ).toBe(true);
+    });
+
+    it('warns when variable statement has @invariant tag', () => {
+      const source = `
+        /** @invariant x > 0 */
+        const value = 5;
+      `;
+      const warnings: string[] = [];
+      transpileWithWarn(source, (msg) => warnings.push(msg));
+      expect(
+        warnings.some((w) => w.includes('only supported on class declarations')),
+      ).toBe(true);
+    });
+
+    it('warns when interface has @invariant tag', () => {
+      const source = `
+        /** @invariant true */
+        interface Shape { area(): number; }
+      `;
+      const warnings: string[] = [];
+      transpileWithWarn(source, (msg) => warnings.push(msg));
+      expect(
+        warnings.some(
+          (w) => w.includes('only supported on class declarations') && w.includes('Shape'),
+        ),
+      ).toBe(true);
+    });
+
+    it('does not warn for valid @invariant on a class', () => {
+      const source = `
+        /** @invariant this.x > 0 */
+        export class Good {
+          constructor(public x: number) {}
+        }
+      `;
+      const warnings: string[] = [];
+      transpileWithWarn(source, (msg) => warnings.push(msg));
+      expect(warnings.some((w) => w.includes('only supported on class declarations'))).toBe(false);
     });
   });
 });
