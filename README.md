@@ -12,7 +12,7 @@ Axiom provides a TypeScript compiler transformer that reads `@pre`, `@post`, `@i
 
 ## Project Background
 
-Axiom is part of an exploration into how far AI-assisted development can go when building a non-trivial tools, widgets and apps. This project has been built based on a human defined architecture, co-authored functional spec and a series of interface contracts, then implemented using using Claude, Qwen and to a lesser extent Gemini.
+Axiom is part of an exploration into how far AI-assisted development can go when building non-trivial tools, widgets and apps. This project has been built based on a human-defined architecture, co-authored functional spec and a series of interface contracts, then implemented using Claude, Qwen and to a lesser extent Gemini.
 
 ## How it works
 
@@ -435,7 +435,7 @@ Both functions throw a `ContractViolationError` (with `type: 'PRE'` or `'POST'`)
 
 ## Limitations
 
-Apart from the features not yet in scope, some of the existing features are limited. For instance axiom offers partial syntax, type and definition checking of the pre and post conditions. It does not however offer a full set of checks yet. The following is a non-exhaustive list of constructs which are currently not covered:
+Apart from the features not yet in scope, some of the existing features are limited. For instance, axiom offers partial syntax, type and definition checking of the pre and post conditions. It does not, however, offer a full set of checks yet. The following is a non-exhaustive list of constructs which are currently not covered:
 
 **1. Union-typed parameters with ambiguous types** — parameters with union types containing multiple distinct primitives (e.g. `number | string`) are excluded from type mismatch detection because the constituent types are contradictory. Nullable unions such as `T | null` and `T | undefined` are fully supported and resolve to `T`.
 ```typescript

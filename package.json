@@ -39,7 +39,7 @@
   "type": "commonjs",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Fultslop/axiom.git"
+    "url": "git+https://github.com/Fultslop/axiom.git"
   },
   "homepage": "https://github.com/Fultslop/axiom#readme",
   "bugs": {
