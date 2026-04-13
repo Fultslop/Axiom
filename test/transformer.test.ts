@@ -1499,6 +1499,96 @@ describe('transformer', () => {
       expect(warnings).toHaveLength(0);
       expect(output).toContain('!(this.balanc > 0)');
     });
+
+    describe('optional chaining on nullable parameter', () => {
+      it('injects @pre for obj?.value when obj is ValueCarrier | null (no warning)', () => {
+        const source = `
+          interface ValueCarrier { value: number }
+          /**
+           * @pre obj?.value > 0
+           */
+          export function doOptionalFn(obj: ValueCarrier | null): number | null { return null; }
+        `;
+        const warnings: string[] = [];
+        const output = transformWithProgram(source, (msg) => warnings.push(msg));
+        expect(warnings).toHaveLength(0);
+        // TypeScript's printer strips the ? from optional chaining
+        expect(output).toContain('(obj.value > 0)');
+      });
+
+      it('injects @pre for obj.value when obj is ValueCarrier (non-nullable, regression)', () => {
+        const source = `
+          interface ValueCarrier { value: number }
+          /**
+           * @pre obj.value > 0
+           */
+          export function doFn(obj: ValueCarrier): number { return 0; }
+        `;
+        const warnings: string[] = [];
+        const output = transformWithProgram(source, (msg) => warnings.push(msg));
+        expect(warnings).toHaveLength(0);
+        expect(output).toContain('(obj.value > 0)');
+      });
+
+      it('warns for obj.balanc when obj is BankAccount (typo, regression)', () => {
+        const source = `
+          interface BankAccount { balance: number }
+          /**
+           * @pre obj.balanc > 0
+           */
+          export function doFn(obj: BankAccount): number { return 0; }
+        `;
+        const warnings: string[] = [];
+        transformWithProgram(source, (msg) => warnings.push(msg));
+        expect(warnings.some((w) => w.includes('balanc'))).toBe(true);
+      });
+
+      it('injects @pre for multi-step obj?.a?.b with all types nullable (no warning)', () => {
+        const source = `
+          interface Inner { bbb: number }
+          interface Outer { aaa: Inner | undefined }
+          /**
+           * @pre obj?.aaa?.bbb > 0
+           */
+          export function deepFn(obj: Outer | null): number { return 0; }
+        `;
+        const warnings: string[] = [];
+        const output = transformWithProgram(source, (msg) => warnings.push(msg));
+        expect(warnings).toHaveLength(0);
+        // TypeScript's printer strips the ? from optional chaining
+        expect(output).toContain('(obj.aaa.bbb > 0)');
+      });
+
+      it('warns for obj?.a?.missing when the final property does not exist', () => {
+        const source = `
+          interface Inner { bbb: number }
+          interface Outer { aaa: Inner | undefined }
+          /**
+           * @pre obj?.aaa?.missing > 0
+           */
+          export function deepFn(obj: Outer | null): number { return 0; }
+        `;
+        const warnings: string[] = [];
+        transformWithProgram(source, (msg) => warnings.push(msg));
+        expect(warnings.some((w) => w.includes('missing'))).toBe(true);
+      });
+
+      it('injects @pre for obj?.value in transpileModule mode (no checker, no warning)', () => {
+        const source = `
+          interface ValueCarrier { value: number }
+          /**
+           * @pre obj?.value > 0
+           */
+          export function doOptionalFn(obj: ValueCarrier | null): number | null { return null; }
+        `;
+        const warnings: string[] = [];
+        const output = transform(source, (msg) => warnings.push(msg));
+        expect(warnings).toHaveLength(0);
+        // TypeScript's printer may strip the ? from optional chaining in transpileModule mode
+        expect(output).toContain('(obj');
+        expect(output).toContain('value > 0)');
+      });
+    });
   });
 
   describe('@pre/@post on arrow function or function expression', () => {
