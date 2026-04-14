@@ -488,6 +488,168 @@ describe('transformer', () => {
     });
   });
 
+  describe('typeof guard narrowing in && chains', () => {
+    it('warns when typeof-narrowed-to-string param is compared to number literal', () => {
+      // x: string | number — resolveSimpleType returns undefined (ambiguous union)
+      // typeof x === "string" narrows x to string; x === 42 should warn
+      const source = `
+        /**
+         * @pre typeof x === "string" && x === 42
+         */
+        export function foo(x: string | number): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings.some((w) => w.includes('type mismatch') && w.includes("'x'"))).toBe(true);
+    });
+
+    it('does not warn when typeof-narrowed-to-number param is used in numeric comparison', () => {
+      const source = `
+        /**
+         * @pre typeof x === "number" && x > 0
+         */
+        export function foo(x: string | number): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+    });
+
+    it('warns when typeof-narrowed-to-boolean param is compared to number literal', () => {
+      const source = `
+        /**
+         * @pre typeof x === "boolean" && x === 1
+         */
+        export function foo(x: boolean | number): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings.some((w) => w.includes('type mismatch') && w.includes("'x'"))).toBe(true);
+    });
+
+    it('does not warn when typeof-narrowed-to-string param is compared to string literal', () => {
+      const source = `
+        /**
+         * @pre typeof x === "string" && x === "hello"
+         */
+        export function foo(x: string | number): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+    });
+  });
+
+  describe('typeof narrowing — existing behaviour preserved', () => {
+    it('warns on non-union string param in typeof guard expression (existing path)', () => {
+      // x already resolves to "string"; narrowed map does not override
+      const source = `
+        /**
+         * @pre typeof x === "string" && x === 42
+         */
+        export function foo(x: string): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings.some((w) => w.includes('type mismatch') && w.includes("'x'"))).toBe(true);
+    });
+
+    it('does not warn for non-union number param in valid numeric comparison', () => {
+      const source = `
+        /**
+         * @pre typeof x === "number" && x > 0
+         */
+        export function foo(x: number): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings).toHaveLength(0);
+    });
+  });
+
+  describe('typeof narrowing — null-check union unaffected', () => {
+    it('warns when number|null param is compared to string literal (existing union resolution)', () => {
+      // resolveSimpleType strips null and returns "number"; no change in behaviour
+      const source = `
+        /**
+         * @pre x !== null && x === "zero"
+         */
+        export function foo(x: number | null): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings.some((w) => w.includes('type mismatch') && w.includes("'x'"))).toBe(true);
+    });
+  });
+
+  describe('typeof narrowing — edge cases', () => {
+    it('does not apply narrowing from || chains', () => {
+      // || is not walked; x remains absent from effective map; no type-mismatch
+      const source = `
+        /**
+         * @pre typeof x === "string" || x === 42
+         */
+        export function foo(x: string | number): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings.filter((w) => w.includes('type mismatch'))).toHaveLength(0);
+    });
+
+    it('narrows multiple params independently in same && chain', () => {
+      // x narrowed to "string", y narrowed to "number"; x === 42 warns, y > 0 does not
+      const source = `
+        /**
+         * @pre typeof x === "string" && typeof y === "number" && x === 42
+         */
+        export function foo(x: string | number, y: string | number): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings.some((w) => w.includes('type mismatch') && w.includes("'x'"))).toBe(true);
+      expect(warnings.filter((w) => w.includes("'y'"))).toHaveLength(0);
+    });
+
+    it('does not extract narrowing from loose-equality typeof guard (== not ===)', () => {
+      // typeof x == "string" uses == — not recognised; no narrowing; no type-mismatch
+      const source = `
+        /**
+         * @pre typeof x == "string" && x === 42
+         */
+        export function foo(x: string | number): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings.filter((w) => w.includes('type mismatch'))).toHaveLength(0);
+    });
+
+    it('does not warn when comparison appears before typeof guard (short-circuit)', () => {
+      // x === 42 evaluates BEFORE typeof guard; narrowing should not apply retroactively
+      const source = `
+        /**
+         * @pre x === 42 && typeof x === "string"
+         */
+        export function foo(x: string | number): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings.filter((w) => w.includes('type mismatch'))).toHaveLength(0);
+    });
+
+    it('warns when comparison appears after typeof guard in reversed position', () => {
+      // typeof guard comes first, then mismatched comparison — should warn
+      const source = `
+        /**
+         * @pre typeof x === "string" && x === 42
+         */
+        export function foo(x: string | number): void {}
+      `;
+      const warnings: string[] = [];
+      transformWithProgram(source, (msg) => warnings.push(msg));
+      expect(warnings.some((w) => w.includes('type mismatch') && w.includes("'x'"))).toBe(true);
+    });
+  });
+
   describe('class invariants', () => {
     function transformES2022(source: string, warn?: (msg: string) => void): string {
       const opts = warn !== undefined ? { warn } : undefined;

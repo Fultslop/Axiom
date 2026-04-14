@@ -225,6 +225,52 @@ function extractIdentifierOperand(
   return result;
 }
 
+function collectAndClauses(
+  node: typescript.Node,
+  out: typescript.Node[],
+): void {
+  if (
+    typescript.isBinaryExpression(node) &&
+    node.operatorToken.kind === typescript.SyntaxKind.AmpersandAmpersandToken
+  ) {
+    collectAndClauses(node.left, out);
+    collectAndClauses(node.right, out);
+  } else {
+    out.push(node);
+  }
+}
+
+const TYPEOF_NARROWABLE = new Set<string>(['string', 'number', 'boolean']);
+
+function extractTypeofGuard(
+  node: typescript.Node,
+): { paramName: string; narrowedType: SimpleType } | undefined {
+  if (!typescript.isBinaryExpression(node)) {
+    return undefined;
+  }
+  if (node.operatorToken.kind !== typescript.SyntaxKind.EqualsEqualsEqualsToken) {
+    return undefined;
+  }
+  const tryExtract = (
+    lhs: typescript.Node,
+    rhs: typescript.Node,
+  ): { paramName: string; narrowedType: SimpleType } | undefined => {
+    if (
+      typescript.isTypeOfExpression(lhs) &&
+      typescript.isIdentifier(lhs.expression) &&
+      typescript.isStringLiteral(rhs) &&
+      TYPEOF_NARROWABLE.has(rhs.text)
+    ) {
+      return {
+        paramName: lhs.expression.text,
+        narrowedType: rhs.text as SimpleType,
+      };
+    }
+    return undefined;
+  };
+  return tryExtract(node.left, node.right) ?? tryExtract(node.right, node.left);
+}
+
 function collectTypeMismatches(
   node: typescript.Node,
   expression: string,
@@ -245,6 +291,33 @@ function collectTypeMismatches(
   typescript.forEachChild(node, (child) => {
     collectTypeMismatches(child, expression, location, paramTypes, errors);
   });
+}
+
+function collectTypeMismatchesWithNarrowing(
+  node: typescript.Expression,
+  expression: string,
+  location: string,
+  paramTypes: Map<string, TypeMapValue>,
+  errors: ValidationError[],
+): void {
+  const clauses: typescript.Node[] = [];
+  collectAndClauses(node, clauses);
+
+  const narrowed = new Map<string, TypeMapValue>();
+  for (const clause of clauses) {
+    const guard = extractTypeofGuard(clause);
+    if (guard !== undefined) {
+      if (!paramTypes.has(guard.paramName) && !narrowed.has(guard.paramName)) {
+        narrowed.set(guard.paramName, guard.narrowedType);
+      }
+    } else {
+      const merged = new Map(paramTypes);
+      for (const [name, type] of narrowed) {
+        merged.set(name, type);
+      }
+      collectTypeMismatches(clause, expression, location, merged, errors);
+    }
+  }
 }
 
 function collectAssignments(
@@ -286,7 +359,7 @@ export function validateExpression(
     collectUnknownIdentifiers(node, expression, location, knownIdentifiers, errors);
   }
   if (paramTypes !== undefined) {
-    collectTypeMismatches(node, expression, location, paramTypes, errors);
+    collectTypeMismatchesWithNarrowing(node, expression, location, paramTypes, errors);
   }
   if (checker !== undefined && contextNode !== undefined) {
     collectDeepPropertyErrors(node, expression, location, checker, contextNode, errors);

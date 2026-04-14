@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.0-alpha.5] - 2026-04-14
+
+### Added
+- `typeof` guard type narrowing in `&&` chains — `typeof x === "string"` narrows ambiguous-union parameters (`string | number`, `boolean | number`, etc.) so that subsequent mismatched comparisons in the same chain emit a `type-mismatch` warning
+- Narrowing respects short-circuit evaluation order — the narrowed type only applies to clauses appearing **after** the guard; preceding clauses are unaffected
+
 ## [0.9.0-alpha.3] - 2026-04-13
 
 ### Fixed
