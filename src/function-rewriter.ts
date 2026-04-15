@@ -16,7 +16,7 @@ const RESULT_ID = 'result' as const;
 const RETURN_TYPE_OK = 'ok' as const;
 const PREV_ID = 'prev' as const;
 
-function expressionUsesResult(expression: string): boolean {
+export function expressionUsesResult(expression: string): boolean {
   try {
     const parsed = parseContractExpression(expression);
     let found = false;

@@ -1,6 +1,7 @@
 import typescript from 'typescript';
 import {
   buildCheckInvariantsCall, buildCheckInvariantsMethod, parseContractExpression,
+  buildPreCheck, buildPostCheck,
 } from './ast-builder';
 import {
   extractInvariantExpressions,
@@ -9,7 +10,12 @@ import {
   extractContractTagsFromNode,
 } from './jsdoc-parser';
 import { validateExpression } from './contract-validator';
-import { tryRewriteFunction, isPublicTarget } from './function-rewriter';
+import {
+  tryRewriteFunction, isPublicTarget, expressionUsesResult, filterValidTags,
+} from './function-rewriter';
+import { buildKnownIdentifiers } from './node-helpers';
+import { buildParameterTypes } from './type-helpers';
+import type { ContractTag } from './jsdoc-parser';
 import {
   resolveInterfaceContracts,
   type InterfaceContracts,
@@ -21,6 +27,53 @@ import type { ReparsedIndex } from './reparsed-index';
 const CHECK_INVARIANTS_NAME = '#checkInvariants' as const;
 const KIND_PRE = 'pre' as const;
 const KIND_POST = 'post' as const;
+const PREV_ID = 'prev' as const;
+
+function expressionUsesPrev(expression: string): boolean {
+  try {
+    const parsed = parseContractExpression(expression);
+    let found = false;
+    function walk(node: typescript.Node): void {
+      if (!found) {
+        if (typescript.isIdentifier(node) && node.text === PREV_ID) {
+          found = true;
+        } else {
+          typescript.forEachChild(node, walk);
+        }
+      }
+    }
+    walk(parsed);
+    return found;
+  } catch {
+    return false;
+  }
+}
+
+function filterConstructorPostTags(
+  postTags: ContractTag[],
+  className: string,
+  warn: (msg: string) => void,
+): ContractTag[] {
+  return postTags.filter((tag) => {
+    if (expressionUsesResult(tag.expression)) {
+      warn(
+        `[axiom] Contract validation warning in ${className}:`
+        + `\n  @post ${tag.expression}`
+        + ` — 'result' used in constructor @post; @post dropped`,
+      );
+      return false;
+    }
+    if (expressionUsesPrev(tag.expression)) {
+      warn(
+        `[axiom] Contract validation warning in ${className}:`
+        + `\n  @post ${tag.expression}`
+        + ` — 'prev' used in constructor @post; @post dropped`,
+      );
+      return false;
+    }
+    return true;
+  });
+}
 
 export function filterValidInvariants(
   expressions: string[],
@@ -102,25 +155,86 @@ function hasClashingMember(node: typescript.ClassDeclaration): boolean {
   );
 }
 
+function buildConstructorKnown(
+  node: typescript.ConstructorDeclaration,
+  checker: typescript.TypeChecker | undefined,
+  allowIdentifiers: string[],
+): {
+  preKnown: Set<string>;
+  postKnown: Set<string>;
+  paramTypes: ReturnType<typeof buildParameterTypes> | undefined;
+} {
+  const preKnown = buildKnownIdentifiers(node, false);
+  const postKnown = buildKnownIdentifiers(node, false);
+  const paramTypes = checker !== undefined ? buildParameterTypes(node, checker) : undefined;
+  for (const allowedId of allowIdentifiers) {
+    preKnown.add(allowedId);
+    postKnown.add(allowedId);
+  }
+  return { preKnown, postKnown, paramTypes };
+}
+
 function rewriteConstructor(
   factory: typescript.NodeFactory,
   node: typescript.ConstructorDeclaration,
   className: string,
+  reparsedIndex: ReparsedIndex,
+  effectiveInvariants: string[],
+  warn: (msg: string) => void,
+  checker: typescript.TypeChecker | undefined,
+  allowIdentifiers: string[],
 ): typescript.ConstructorDeclaration {
   const originalBody = node.body;
   if (!originalBody) {
     return node;
   }
-  const location = `${className}.constructor`;
-  const newStatements = [
-    ...Array.from(originalBody.statements),
-    buildCheckInvariantsCall(location, factory),
-  ];
+  const location = className;
+  const reparsedNode = reparsedIndex.functions.get(node.pos) ?? node;
+  const allTags = extractContractTags(reparsedNode);
+  const allPreInput = allTags.filter((tag) => tag.kind === KIND_PRE);
+  const allPostInput = allTags.filter((tag) => tag.kind === KIND_POST);
+
+  const filteredPost = filterConstructorPostTags(allPostInput, className, warn);
+
+  const { preKnown, postKnown, paramTypes } = buildConstructorKnown(
+    node, checker, allowIdentifiers,
+  );
+
+  const preTags = filterValidTags(
+    allPreInput, KIND_PRE, location, warn, preKnown, paramTypes, checker, node,
+  );
+  const postTags = filterValidTags(
+    filteredPost, KIND_POST, location, warn, postKnown, paramTypes, checker, node,
+  );
+
+  const hasInvariants = effectiveInvariants.length > 0;
+  const exportedNames = new Set<string>();
+
+  if (
+    preTags.length === 0 &&
+    postTags.length === 0 &&
+    !hasInvariants
+  ) {
+    return node;
+  }
+
+  const statements: typescript.Statement[] = [];
+  for (const tag of preTags) {
+    statements.push(buildPreCheck(tag.expression, location, factory, exportedNames));
+  }
+  statements.push(...Array.from(originalBody.statements));
+  for (const tag of postTags) {
+    statements.push(buildPostCheck(tag.expression, location, factory, exportedNames));
+  }
+  if (hasInvariants) {
+    statements.push(buildCheckInvariantsCall(location, factory));
+  }
+
   return factory.updateConstructorDeclaration(
     node,
     typescript.getModifiers(node),
     node.parameters,
-    factory.createBlock(newStatements, true),
+    factory.createBlock(statements, true),
   );
 }
 
@@ -173,18 +287,11 @@ function rewriteMember(
     };
   }
   if (typescript.isConstructorDeclaration(member)) {
-    const constructorTags = extractContractTagsFromNode(member);
-    if (constructorTags.length > 0) {
-      warn(
-        `[axiom] Warning: @pre/@post on constructors is not supported`
-        + ` — use @invariant on the class or call pre()/post() manually`
-        + ` inside the constructor body (in ${className}.constructor)`,
-      );
-    }
-    if (effectiveInvariants.length > 0) {
-      return { element: rewriteConstructor(factory, member, className), changed: true };
-    }
-    return { element: member, changed: false };
+    const rewritten = rewriteConstructor(
+      factory, member, className, reparsedIndex,
+      effectiveInvariants, warn, checker, allowIdentifiers,
+    );
+    return { element: rewritten, changed: rewritten !== member };
   }
   return { element: member, changed: false };
 }
