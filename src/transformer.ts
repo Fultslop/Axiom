@@ -1,6 +1,9 @@
 import typescript from 'typescript';
 import { buildReparsedIndex, type ReparsedIndex } from './reparsed-index';
-import { tryRewriteFunction, isPublicTarget } from './function-rewriter';
+import {
+  tryRewriteFunction, isPublicTarget,
+  normaliseKeepContracts, type KeepContracts,
+} from './function-rewriter';
 import { tryRewriteClass } from './class-rewriter';
 import { buildRequireStatement } from './require-injection';
 import type { ParamMismatchMode } from './interface-resolver';
@@ -98,6 +101,7 @@ function visitNode(
   reparsedCache: Map<string, typescript.SourceFile>,
   paramMismatch: ParamMismatchMode,
   allowIdentifiers: string[],
+  keepContracts: KeepContracts,
 ): typescript.Node {
   if (typescript.isClassDeclaration(node)) {
     return tryRewriteClass(
@@ -122,12 +126,13 @@ function visitNode(
       [],
       undefined,
       allowIdentifiers,
+      keepContracts,
     );
     return typescript.visitEachChild(
       rewritten,
       (child) => visitNode(
         factory, child, context, reparsedIndex, transformed, warn,
-        checker, reparsedCache, paramMismatch, allowIdentifiers,
+        checker, reparsedCache, paramMismatch, allowIdentifiers, keepContracts,
       ),
       context,
     );
@@ -148,7 +153,7 @@ function visitNode(
     node,
     (child) => visitNode(
       factory, child, context, reparsedIndex, transformed, warn,
-      checker, reparsedCache, paramMismatch, allowIdentifiers,
+      checker, reparsedCache, paramMismatch, allowIdentifiers, keepContracts,
     ),
     context,
   );
@@ -166,6 +171,7 @@ export default function createTransformer(
     warn?: (msg: string) => void;
     interfaceParamMismatch?: 'rename' | 'ignore';
     allowIdentifiers?: string[];
+    keepContracts?: boolean | 'pre' | 'post' | 'invariant' | 'all';
   },
 ): typescript.TransformerFactory<typescript.SourceFile> {
   const warn = options?.warn ?? ((msg: string): void => {
@@ -175,6 +181,7 @@ export default function createTransformer(
   const paramMismatch: ParamMismatchMode = rawMode === MODE_IGNORE ? 'ignore' : 'rename';
   const checker = _program?.getTypeChecker?.();
   const allowIdentifiers = options?.allowIdentifiers ?? [];
+  const keepContracts = normaliseKeepContracts(options?.keepContracts);
   const reparsedCache = new Map<string, typescript.SourceFile>();
 
   return (context: typescript.TransformationContext) => {
@@ -189,7 +196,7 @@ export default function createTransformer(
         sourceFile,
         (node) => visitNode(
           factory, node, context, reparsedIndex, transformed, warn,
-          checker, reparsedCache, paramMismatch, allowIdentifiers,
+          checker, reparsedCache, paramMismatch, allowIdentifiers, keepContracts,
         ),
         context,
       );

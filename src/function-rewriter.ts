@@ -16,6 +16,76 @@ const RESULT_ID = 'result' as const;
 const RETURN_TYPE_OK = 'ok' as const;
 const PREV_ID = 'prev' as const;
 
+const KEEP_PRE = 'pre' as const;
+const KEEP_POST = 'post' as const;
+const KEEP_INVARIANT = 'invariant' as const;
+const KEEP_ALL = 'all' as const;
+
+export type KeepContracts = false | 'pre' | 'post' | 'invariant' | 'all';
+
+export function normaliseKeepContracts(
+  raw: boolean | 'pre' | 'post' | 'invariant' | 'all' | undefined,
+): KeepContracts {
+  if (raw === true) {
+    return KEEP_ALL;
+  }
+  if (!raw) {
+    return false;
+  }
+  return raw as KeepContracts;
+}
+
+function shouldEmitPre(keepContracts: KeepContracts): boolean {
+  if (keepContracts === false) {
+    return true;
+  }
+  if (keepContracts === KEEP_PRE) {
+    return true;
+  }
+  if (keepContracts === KEEP_ALL) {
+    return true;
+  }
+  return false;
+}
+
+function shouldEmitPost(keepContracts: KeepContracts): boolean {
+  if (keepContracts === false) {
+    return true;
+  }
+  if (keepContracts === KEEP_POST) {
+    return true;
+  }
+  if (keepContracts === KEEP_ALL) {
+    return true;
+  }
+  return false;
+}
+
+function shouldEmitInvariant(keepContracts: KeepContracts): boolean {
+  if (keepContracts === false) {
+    return true;
+  }
+  if (keepContracts === KEEP_INVARIANT) {
+    return true;
+  }
+  if (keepContracts === KEEP_ALL) {
+    return true;
+  }
+  return false;
+}
+
+function allContractsFiltered(
+  preTags: ContractTag[],
+  postTags: ContractTag[],
+  invariantCall: typescript.ExpressionStatement | null,
+  keepContracts: KeepContracts,
+): boolean {
+  const activePre = shouldEmitPre(keepContracts) ? preTags.length : 0;
+  const activePost = shouldEmitPost(keepContracts) ? postTags.length : 0;
+  const activeInv = shouldEmitInvariant(keepContracts) && invariantCall !== null ? 1 : 0;
+  return activePre === 0 && activePost === 0 && activeInv === 0;
+}
+
 export function expressionUsesResult(expression: string): boolean {
   try {
     const parsed = parseContractExpression(expression);
@@ -272,23 +342,28 @@ function buildGuardedStatements(
   invariantCall: typescript.ExpressionStatement | null,
   prevCapture: string | null,
   exportedNames: Set<string>,
+  keepContracts: KeepContracts,
 ): typescript.Statement[] {
   const statements: typescript.Statement[] = [];
 
-  for (const tag of preTags) {
+  const activePre = shouldEmitPre(keepContracts) ? preTags : [];
+  const activePost = shouldEmitPost(keepContracts) ? postTags : [];
+  const activeInvariant = shouldEmitInvariant(keepContracts) ? invariantCall : null;
+
+  for (const tag of activePre) {
     statements.push(buildPreCheck(tag.expression, location, factory, exportedNames));
   }
 
-  if (postTags.length > 0 || invariantCall !== null) {
+  if (activePost.length > 0 || activeInvariant !== null) {
     if (prevCapture !== null) {
       statements.push(buildPrevCapture(prevCapture, factory));
     }
     statements.push(buildBodyCapture(originalBody.statements, factory));
-    for (const tag of postTags) {
+    for (const tag of activePost) {
       statements.push(buildPostCheck(tag.expression, location, factory, exportedNames));
     }
-    if (invariantCall !== null) {
-      statements.push(invariantCall);
+    if (activeInvariant !== null) {
+      statements.push(activeInvariant);
     }
     statements.push(buildResultReturn(factory));
   } else {
@@ -378,31 +453,23 @@ function shouldSkipRewrite(
   return preTags.length === 0 && postTags.length === 0 && invariantCall === null;
 }
 
-function rewriteFunction(
-  factory: typescript.NodeFactory,
+function extractAndFilterTags(
   node: typescript.FunctionLikeDeclaration,
-  reparsedFunctions: Map<number, typescript.FunctionLikeDeclaration>,
+  reparsedNode: typescript.FunctionLikeDeclaration,
+  interfaceMethodContracts: InterfaceMethodContracts | undefined,
+  location: string,
   warn: (msg: string) => void,
-  checker?: typescript.TypeChecker,
-  invariantExpressions: string[] = [],
-  interfaceMethodContracts?: InterfaceMethodContracts,
-  allowIdentifiers: string[] = [],
-): typescript.FunctionLikeDeclaration | null {
-  const originalBody = node.body;
-  if (!originalBody || !typescript.isBlock(originalBody)) {
-    return null;
-  }
-
-  const reparsedNode = reparsedFunctions.get(node.pos) ?? node;
+  preKnown: Set<string>,
+  postKnown: Set<string>,
+  checker: typescript.TypeChecker | undefined,
+  paramTypes: Map<string, TypeMapValue> | undefined,
+  postParamTypes: Map<string, TypeMapValue> | undefined,
+): {
+  preTags: ContractTag[];
+  postTags: ContractTag[];
+  prevCapture: string | null;
+} {
   const classTags = extractContractTags(reparsedNode);
-
-  const location = buildLocationName(node);
-  const preKnown = buildKnownIdentifiers(node, false);
-  const postKnown = buildKnownIdentifiers(node, true);
-  const exportedNames = mergeIdentifiers(preKnown, postKnown, checker, node, allowIdentifiers);
-  const paramTypes = checker !== undefined ? buildParameterTypes(node, checker) : undefined;
-  const postParamTypes = buildPostParamTypes(node, checker, paramTypes);
-
   const { allPreInput, allPostInput } = buildTagInputs(classTags, interfaceMethodContracts);
 
   const preTags = filterValidTags(
@@ -410,10 +477,8 @@ function rewriteFunction(
   );
   const postTagsWithResult = filterPostTagsWithResult(allPostInput, node, location, warn);
 
-  // Check if any post tag uses 'prev' before resolving capture
   const anyPostUsesPrev = postTagsWithResult.some((tag) => expressionUsesPrev(tag.expression));
 
-  // Resolve prev capture only if needed
   let prevCapture: string | null = null;
   if (anyPostUsesPrev) {
     prevCapture = resolvePrevCapture(
@@ -428,16 +493,53 @@ function rewriteFunction(
     postTagsFiltered, KIND_POST, location, warn, postKnown, postParamTypes, checker, node,
   );
 
+  return { preTags, postTags, prevCapture };
+}
+
+function rewriteFunction(
+  factory: typescript.NodeFactory,
+  node: typescript.FunctionLikeDeclaration,
+  reparsedFunctions: Map<number, typescript.FunctionLikeDeclaration>,
+  warn: (msg: string) => void,
+  checker?: typescript.TypeChecker,
+  invariantExpressions: string[] = [],
+  interfaceMethodContracts?: InterfaceMethodContracts,
+  allowIdentifiers: string[] = [],
+  keepContracts: KeepContracts = false,
+): typescript.FunctionLikeDeclaration | null {
+  const originalBody = node.body;
+  if (!originalBody || !typescript.isBlock(originalBody)) {
+    return null;
+  }
+
+  const reparsedNode = reparsedFunctions.get(node.pos) ?? node;
+
+  const location = buildLocationName(node);
+  const preKnown = buildKnownIdentifiers(node, false);
+  const postKnown = buildKnownIdentifiers(node, true);
+  const exportedNames = mergeIdentifiers(preKnown, postKnown, checker, node, allowIdentifiers);
+  const paramTypes = checker !== undefined ? buildParameterTypes(node, checker) : undefined;
+  const postParamTypes = buildPostParamTypes(node, checker, paramTypes);
+
+  const { preTags, postTags, prevCapture } = extractAndFilterTags(
+    node, reparsedNode, interfaceMethodContracts, location, warn,
+    preKnown, postKnown, checker, paramTypes, postParamTypes,
+  );
+
   const invariantCall = buildInvariantCallIfNeeded(
     factory, node, location, invariantExpressions,
   );
 
-  if (shouldSkipRewrite(preTags, postTags, invariantCall)) {
+  if (
+    shouldSkipRewrite(preTags, postTags, invariantCall) ||
+    allContractsFiltered(preTags, postTags, invariantCall, keepContracts)
+  ) {
     return null;
   }
 
   const newStatements = buildGuardedStatements(
-    factory, preTags, postTags, originalBody, location, invariantCall, prevCapture, exportedNames,
+    factory, preTags, postTags, originalBody, location, invariantCall,
+    prevCapture, exportedNames, keepContracts,
   );
   return applyNewBody(factory, node, factory.createBlock(newStatements, true));
 }
@@ -452,11 +554,12 @@ export function tryRewriteFunction(
   invariantExpressions: string[] = [],
   interfaceMethodContracts?: InterfaceMethodContracts,
   allowIdentifiers: string[] = [],
+  keepContracts: KeepContracts = false,
 ): typescript.FunctionLikeDeclaration {
   try {
     const rewritten = rewriteFunction(
       factory, node, reparsedFunctions, warn, checker,
-      invariantExpressions, interfaceMethodContracts, allowIdentifiers,
+      invariantExpressions, interfaceMethodContracts, allowIdentifiers, keepContracts,
     );
     if (rewritten === null) {
       return node;

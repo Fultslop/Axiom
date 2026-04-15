@@ -1,8 +1,18 @@
 import typescript from 'typescript';
 import createTransformer from '@src/transformer';
 
-export function transform(source: string, warn?: (msg: string) => void): string {
-  const options = warn !== undefined ? { warn } : undefined;
+export type TransformOptions = {
+  warn?: (msg: string) => void;
+  keepContracts?: boolean | 'pre' | 'post' | 'invariant' | 'all';
+};
+
+export function transform(
+  source: string,
+  optionsOrWarn?: ((msg: string) => void) | TransformOptions,
+): string {
+  const options = typeof optionsOrWarn === 'function'
+    ? { warn: optionsOrWarn }
+    : optionsOrWarn;
   const result = typescript.transpileModule(source, {
     compilerOptions: {
       target: typescript.ScriptTarget.ES2020,
