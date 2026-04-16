@@ -47,40 +47,7 @@ describe('buildLocationName for arrow and function expressions', () => {
 });
 ```
 
-- [ ] **Step 2: Add `isExportedVariableInitialiser` to `src/node-helpers.ts`**
-
-Add after the `isPublicTarget` function:
-
-```typescript
-export function isExportedVariableInitialiser(
-  node: typescript.FunctionLikeDeclaration,
-): boolean {
-  if (
-    !typescript.isArrowFunction(node) &&
-    !typescript.isFunctionExpression(node)
-  ) {
-    return false;
-  }
-  const varDecl = node.parent;
-  if (!typescript.isVariableDeclaration(varDecl)) {
-    return false;
-  }
-  const varDeclList = varDecl.parent;
-  if (!typescript.isVariableDeclarationList(varDeclList)) {
-    return false;
-  }
-  const varStmt = varDeclList.parent;
-  if (!typescript.isVariableStatement(varStmt)) {
-    return false;
-  }
-  const modifiers = typescript.canHaveModifiers(varStmt)
-    ? typescript.getModifiers(varStmt) ?? []
-    : [];
-  return modifiers.some((mod) => mod.kind === typescript.SyntaxKind.ExportKeyword);
-}
-```
-
-- [ ] **Step 3: Extend `buildLocationName` in `src/node-helpers.ts`**
+- [ ] **Step 2: Extend `buildLocationName` in `src/node-helpers.ts`**
 
 Add two new cases **before** the final `return 'anonymous'` fallback:
 
@@ -97,7 +64,7 @@ Add two new cases **before** the final `return 'anonymous'` fallback:
   }
 ```
 
-- [ ] **Step 4: Run lint and typecheck**
+- [ ] **Step 3: Run lint and typecheck**
 
 ```
 npm run lint && npm run typecheck
@@ -105,7 +72,7 @@ npm run lint && npm run typecheck
 
 Expected: no errors.
 
-- [ ] **Step 5: Run full test suite**
+- [ ] **Step 4: Run full test suite**
 
 ```
 npm test
@@ -119,6 +86,8 @@ Expected: all existing tests pass; no regressions. The smoke-test from Step 1 al
 
 - `npm run lint && npm run typecheck` exit 0.
 - `npm test` exits 0 with no regressions.
-- `src/node-helpers.ts` exports `isExportedVariableInitialiser`.
 - `buildLocationName` returns the variable name for arrow/function-expression nodes whose parent
   is a `VariableDeclaration` with an identifier name.
+
+> **Note:** `isExportedVariableInitialiser` is intentionally deferred to Task 4. knip rejects
+> unused exports, and this function has no caller until `transformer.ts` imports it in Task 4.

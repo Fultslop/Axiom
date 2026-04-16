@@ -9,7 +9,7 @@ We are adding `@pre`/`@post` contract injection support for exported `const` arr
 function expressions.
 
 **What previous tasks added (already in the codebase):**
-- Task 1: `isExportedVariableInitialiser` + extended `buildLocationName` in `src/node-helpers.ts`
+- Task 1: extended `buildLocationName` in `src/node-helpers.ts`
 - Task 2: `extractContractTagsForFunctionLike` + updated `extractContractTags` in
   `src/jsdoc-parser.ts`
 - Task 3: `normaliseArrowBody` + extended `applyNewBody` in `src/function-rewriter.ts`; three
@@ -17,10 +17,11 @@ function expressions.
 
 **What this task does:**
 Wires up the dispatch in `src/transformer.ts` so the three tests from Task 3 start passing.
-Adds two helpers (`rewriteVariableDeclaration`, `visitVariableStatement`) and a new branch in
-`visitNode` that handles `VariableStatement` nodes.
+Adds `isExportedVariableInitialiser` to `src/node-helpers.ts` (deferred from Task 1 because knip
+rejects unused exports), then adds two helpers (`rewriteVariableDeclaration`,
+`visitVariableStatement`) and a new branch in `visitNode` that handles `VariableStatement` nodes.
 
-**Only `src/transformer.ts` changes in this task.**
+**Files changed in this task: `src/node-helpers.ts` and `src/transformer.ts`.**
 
 ---
 
@@ -35,7 +36,40 @@ Adds two helpers (`rewriteVariableDeclaration`, `visitVariableStatement`) and a 
 
 ## Steps
 
-- [ ] **Step 1: Update imports in `src/transformer.ts`**
+- [ ] **Step 1: Add `isExportedVariableInitialiser` to `src/node-helpers.ts`**
+
+Add after the `isPublicTarget` function:
+
+```typescript
+export function isExportedVariableInitialiser(
+  node: typescript.FunctionLikeDeclaration,
+): boolean {
+  if (
+    !typescript.isArrowFunction(node) &&
+    !typescript.isFunctionExpression(node)
+  ) {
+    return false;
+  }
+  const varDecl = node.parent;
+  if (!typescript.isVariableDeclaration(varDecl)) {
+    return false;
+  }
+  const varDeclList = varDecl.parent;
+  if (!typescript.isVariableDeclarationList(varDeclList)) {
+    return false;
+  }
+  const varStmt = varDeclList.parent;
+  if (!typescript.isVariableStatement(varStmt)) {
+    return false;
+  }
+  const modifiers = typescript.canHaveModifiers(varStmt)
+    ? typescript.getModifiers(varStmt) ?? []
+    : [];
+  return modifiers.some((mod) => mod.kind === typescript.SyntaxKind.ExportKeyword);
+}
+```
+
+- [ ] **Step 2: Update imports in `src/transformer.ts`**
 
 Update the import from `./function-rewriter` to include `normaliseArrowBody`:
 
@@ -51,7 +85,7 @@ Update (or add) the import from `./node-helpers` to include `isExportedVariableI
 import { isExportedVariableInitialiser } from './node-helpers';
 ```
 
-- [ ] **Step 2: Add `rewriteVariableDeclaration` helper in `src/transformer.ts`**
+- [ ] **Step 3: Add `rewriteVariableDeclaration` helper in `src/transformer.ts`**
 
 Add before the `visitNode` function:
 
@@ -102,7 +136,7 @@ function rewriteVariableDeclaration(
 }
 ```
 
-- [ ] **Step 3: Add `visitVariableStatement` helper in `src/transformer.ts`**
+- [ ] **Step 4: Add `visitVariableStatement` helper in `src/transformer.ts`**
 
 Add after `rewriteVariableDeclaration`:
 
@@ -144,7 +178,7 @@ function visitVariableStatement(
 }
 ```
 
-- [ ] **Step 4: Add `VariableStatement` branch to `visitNode` in `src/transformer.ts`**
+- [ ] **Step 5: Add `VariableStatement` branch to `visitNode` in `src/transformer.ts`**
 
 Insert **before** the `return typescript.visitEachChild(...)` call at the end of `visitNode`:
 
@@ -162,7 +196,7 @@ Insert **before** the `return typescript.visitEachChild(...)` call at the end of
   }
 ```
 
-- [ ] **Step 5: Run the failing tests from Task 3 — expect them to pass now**
+- [ ] **Step 6: Run the failing tests from Task 3 — expect them to pass now**
 
 ```
 npx jest --testPathPattern="transformer" -t "arrow function|function expression" --no-coverage
@@ -170,7 +204,7 @@ npx jest --testPathPattern="transformer" -t "arrow function|function expression"
 
 Expected: all three now PASS.
 
-- [ ] **Step 6: Run full test suite**
+- [ ] **Step 7: Run full test suite**
 
 ```
 npm test
@@ -178,7 +212,7 @@ npm test
 
 Expected: all tests pass; no regressions.
 
-- [ ] **Step 7: Run lint and typecheck**
+- [ ] **Step 8: Run lint and typecheck**
 
 ```
 npm run lint && npm run typecheck
@@ -193,5 +227,6 @@ Expected: no errors.
 - `npm run lint && npm run typecheck` exit 0.
 - `npm test` exits 0 — all tests green including the three arrow/function-expression tests from
   Task 3.
+- `src/node-helpers.ts` exports `isExportedVariableInitialiser`.
 - `src/transformer.ts` contains `rewriteVariableDeclaration`, `visitVariableStatement`, and the
   `isVariableStatement` branch in `visitNode`.

@@ -212,3 +212,14 @@ export function inc(x: number): number { return x + 1; }
     expect(result).not.toContain('ContractViolationError("PRE"');
   });
 });
+
+describe('buildLocationName for arrow and function expressions', () => {
+  it('returns variable name for arrow function assigned to exported const', () => {
+    const source = `
+      export const validate = /** @pre x > 0 */ (x: number): boolean => x > 0;
+    `;
+    // Full injection is wired in Task 4. Here we just confirm no throw on valid input
+    // and that the helpers compile correctly.
+    expect(() => transform(source)).not.toThrow();
+  });
+});

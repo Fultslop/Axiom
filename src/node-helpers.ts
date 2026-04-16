@@ -20,17 +20,31 @@ export function isPublicTarget(node: typescript.FunctionLikeDeclaration): boolea
   return isExportedFunction || isPublicMethod;
 }
 
+function buildMethodLocationName(node: typescript.MethodDeclaration): string {
+  const className =
+    typescript.isClassDeclaration(node.parent) && node.parent.name
+      ? node.parent.name.text
+      : 'UnknownClass';
+  const methodName =
+    typescript.isIdentifier(node.name) ? node.name.text : 'unknownMethod';
+  return `${className}.${methodName}`;
+}
+
 export function buildLocationName(node: typescript.FunctionLikeDeclaration): string {
   if (typescript.isMethodDeclaration(node)) {
-    const className =
-      typescript.isClassDeclaration(node.parent) && node.parent.name
-        ? node.parent.name.text
-        : 'UnknownClass';
-    const methodName =
-      typescript.isIdentifier(node.name) ? node.name.text : 'unknownMethod';
-    return `${className}.${methodName}`;
+    return buildMethodLocationName(node);
   }
   if (typescript.isFunctionDeclaration(node) && node.name) {
+    return node.name.text;
+  }
+  if (
+    (typescript.isArrowFunction(node) || typescript.isFunctionExpression(node)) &&
+    typescript.isVariableDeclaration(node.parent) &&
+    typescript.isIdentifier(node.parent.name)
+  ) {
+    return node.parent.name.text;
+  }
+  if (typescript.isFunctionExpression(node) && node.name !== undefined) {
     return node.name.text;
   }
   return 'anonymous';
