@@ -362,6 +362,28 @@ function buildGuardedStatements(
   return statements;
 }
 
+export function normaliseArrowBody(
+  factory: typescript.NodeFactory,
+  node: typescript.ArrowFunction,
+): typescript.ArrowFunction {
+  if (typescript.isBlock(node.body)) {
+    return node;
+  }
+  const returnStmt = factory.createReturnStatement(
+    node.body as typescript.Expression,
+  );
+  const block = factory.createBlock([returnStmt], /* multiLine */ true);
+  return factory.updateArrowFunction(
+    node,
+    typescript.getModifiers(node),
+    node.typeParameters,
+    node.parameters,
+    node.type,
+    node.equalsGreaterThanToken,
+    block,
+  );
+}
+
 function applyNewBody(
   factory: typescript.NodeFactory,
   node: typescript.FunctionLikeDeclaration,
@@ -382,6 +404,29 @@ function applyNewBody(
   }
   if (typescript.isFunctionDeclaration(node)) {
     return factory.updateFunctionDeclaration(
+      node,
+      typescript.getModifiers(node),
+      node.asteriskToken,
+      node.name,
+      node.typeParameters,
+      node.parameters,
+      node.type,
+      newBody,
+    );
+  }
+  if (typescript.isArrowFunction(node)) {
+    return factory.updateArrowFunction(
+      node,
+      typescript.getModifiers(node),
+      node.typeParameters,
+      node.parameters,
+      node.type,
+      node.equalsGreaterThanToken,
+      newBody,
+    );
+  }
+  if (typescript.isFunctionExpression(node)) {
+    return factory.updateFunctionExpression(
       node,
       typescript.getModifiers(node),
       node.asteriskToken,

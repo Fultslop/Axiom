@@ -223,3 +223,41 @@ describe('buildLocationName for arrow and function expressions', () => {
     expect(() => transform(source)).not.toThrow();
   });
 });
+
+describe('arrow function with expression body (@pre)', () => {
+  it('injects @pre guard into expression-body arrow', () => {
+    const source = `
+      export const double = /** @pre x > 0 */ (x: number): number => x * 2;
+    `;
+    const compiled = transform(source);
+    expect(compiled).toContain('ContractViolationError');
+    expect(compiled).toContain('x > 0');
+  });
+});
+
+describe('arrow function with block body (@pre)', () => {
+  it('injects @pre guard into block-body arrow', () => {
+    const source = `
+      export const clamp = /** @pre min <= max */
+        (num: number, min: number, max: number): number => {
+          return Math.min(Math.max(num, min), max);
+        };
+    `;
+    const compiled = transform(source);
+    expect(compiled).toContain('ContractViolationError');
+    expect(compiled).toContain('min <= max');
+  });
+});
+
+describe('function expression (@pre)', () => {
+  it('injects @pre guard into exported function expression', () => {
+    const source = `
+      export const trim = /** @pre input.length > 0 */ function(input: string): string {
+        return input.trim();
+      };
+    `;
+    const compiled = transform(source);
+    expect(compiled).toContain('ContractViolationError');
+    expect(compiled).toContain('input.length > 0');
+  });
+});

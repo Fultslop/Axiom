@@ -27,6 +27,12 @@ immediately. If it does not, see the troubleshooting note below.
 
 - [ ] **Step 1: Add the location-string test to `test/transformer.test.ts`**
 
+Tests assert on compiled string output — this is the existing pattern in this codebase.
+There is no `loadFunction` helper; do not invent one.
+
+The location name is embedded in the injected `ContractViolationError` call as a string literal.
+Assert that the compiled output contains `'validate'` and does not contain `'anonymous'`.
+
 ```typescript
 describe('location string for arrow function', () => {
   it('uses the variable name in the ContractError message', () => {
@@ -34,15 +40,9 @@ describe('location string for arrow function', () => {
       export const validate = /** @pre x > 0 */ (x: number): boolean => x > 0;
     `;
     const compiled = transform(source);
-    const fn = loadFunction<(x: number) => boolean>(compiled, 'validate');
-    let message = '';
-    try {
-      fn(-1);
-    } catch (err: unknown) {
-      message = err instanceof Error ? err.message : String(err);
-    }
-    expect(message).toContain('validate');
-    expect(message).not.toContain('anonymous');
+    expect(compiled).toContain('ContractViolationError');
+    expect(compiled).toContain('"validate"');
+    expect(compiled).not.toContain('"anonymous"');
   });
 });
 ```
@@ -73,4 +73,4 @@ Expected: all tests pass.
 ## Done when
 
 - `npm test` exits 0 — all tests green.
-- The new test asserts `message.toContain('validate')` and `not.toContain('anonymous')` — both pass.
+- The new test asserts `compiled.toContain('"validate"')` and `not.toContain('"anonymous"')` — both pass.

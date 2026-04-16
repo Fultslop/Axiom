@@ -27,6 +27,9 @@ pass immediately without any source changes — the implementation is already co
 
 - [ ] **Step 1: Add the remaining tests to `test/transformer.test.ts`**
 
+Tests assert on compiled string output — this is the existing pattern in this codebase.
+There is no `loadFunction` helper; do not invent one.
+
 ```typescript
 describe('arrow function @post with result', () => {
   it('injects @post result check (expression body)', () => {
@@ -34,9 +37,8 @@ describe('arrow function @post with result', () => {
       export const abs = /** @post result >= 0 */ (x: number): number => Math.abs(x);
     `;
     const compiled = transform(source);
-    const fn = loadFunction<(x: number) => number>(compiled, 'abs');
-    expect(fn(-3)).toBe(3);
-    expect(fn(3)).toBe(3);
+    expect(compiled).toContain('ContractViolationError');
+    expect(compiled).toContain('result >= 0');
   });
 
   it('warns and drops @post result when no return type annotation', () => {
@@ -60,14 +62,10 @@ describe('named function expression', () => {
         };
     `;
     const compiled = transform(source);
-    const fn = loadFunction<(num: number) => number>(compiled, 'factorial');
-    expect(() => fn(-1)).toThrow();
-    let message = '';
-    try { fn(-1); } catch (err: unknown) {
-      message = err instanceof Error ? err.message : String(err);
-    }
-    expect(message).toContain('factorial');
-    expect(fn(5)).toBe(120);
+    expect(compiled).toContain('ContractViolationError');
+    expect(compiled).toContain('num >= 0');
+    expect(compiled).toContain('"factorial"');
+    expect(compiled).not.toContain('"fact"');
   });
 });
 
@@ -79,7 +77,6 @@ describe('non-exported arrow function — no injection', () => {
     const warnings: string[] = [];
     const compiled = transform(source, (msg) => warnings.push(msg));
     expect(warnings).toHaveLength(0);
-    // No contract injection means no require() call for the runtime.
     expect(compiled).not.toContain('require(');
   });
 });
@@ -102,11 +99,8 @@ describe('multiple contracts on one arrow', () => {
         (numerator: number, denominator: number): number => numerator / denominator;
     `;
     const compiled = transform(source);
-    const fn = loadFunction<(numerator: number, denominator: number) => number>(
-      compiled, 'divide',
-    );
-    expect(() => fn(1, 0)).toThrow();
-    expect(fn(10, 2)).toBe(5);
+    expect(compiled).toContain('denominator !== 0');
+    expect(compiled).toContain('result !== Infinity');
   });
 });
 
@@ -129,9 +123,8 @@ describe('VariableStatement with multiple declarations', () => {
     `;
     const compiled = transform(source);
     expect(compiled).toContain('alpha');
-    const fn = loadFunction<(x: number) => boolean>(compiled, 'validate');
-    expect(() => fn(-1)).toThrow();
-    expect(fn(1)).toBe(true);
+    expect(compiled).toContain('ContractViolationError');
+    expect(compiled).toContain('x > 0');
   });
 });
 ```

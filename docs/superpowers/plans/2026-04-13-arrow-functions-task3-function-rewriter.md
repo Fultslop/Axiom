@@ -38,23 +38,25 @@ still fail because `transformer.ts` does not yet call these helpers. That wiring
 
 - [ ] **Step 1: Write failing tests in `test/transformer.test.ts`**
 
+Tests assert on the compiled string output — this is the existing pattern in this codebase.
+There is no `loadFunction` helper; do not invent one.
+
 Add the following three `describe` blocks:
 
 ```typescript
 describe('arrow function with expression body (@pre)', () => {
-  it('injects @pre check and throws ContractError on violation', () => {
+  it('injects @pre guard into expression-body arrow', () => {
     const source = `
       export const double = /** @pre x > 0 */ (x: number): number => x * 2;
     `;
     const compiled = transform(source);
-    const fn = loadFunction<(x: number) => number>(compiled, 'double');
-    expect(() => fn(-1)).toThrow();
-    expect(fn(2)).toBe(4);
+    expect(compiled).toContain('ContractViolationError');
+    expect(compiled).toContain('x > 0');
   });
 });
 
 describe('arrow function with block body (@pre)', () => {
-  it('injects @pre check into block-body arrow', () => {
+  it('injects @pre guard into block-body arrow', () => {
     const source = `
       export const clamp = /** @pre min <= max */
         (num: number, min: number, max: number): number => {
@@ -62,23 +64,21 @@ describe('arrow function with block body (@pre)', () => {
         };
     `;
     const compiled = transform(source);
-    const fn = loadFunction<(num: number, min: number, max: number) => number>(compiled, 'clamp');
-    expect(() => fn(5, 10, 1)).toThrow();
-    expect(fn(5, 1, 10)).toBe(5);
+    expect(compiled).toContain('ContractViolationError');
+    expect(compiled).toContain('min <= max');
   });
 });
 
 describe('function expression (@pre)', () => {
-  it('injects @pre check into exported function expression', () => {
+  it('injects @pre guard into exported function expression', () => {
     const source = `
       export const trim = /** @pre input.length > 0 */ function(input: string): string {
         return input.trim();
       };
     `;
     const compiled = transform(source);
-    const fn = loadFunction<(input: string) => string>(compiled, 'trim');
-    expect(() => fn('')).toThrow();
-    expect(fn('  hello  ')).toBe('hello');
+    expect(compiled).toContain('ContractViolationError');
+    expect(compiled).toContain('input.length > 0');
   });
 });
 ```
