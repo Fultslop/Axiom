@@ -362,7 +362,7 @@ function buildGuardedStatements(
   return statements;
 }
 
-export function applyNewBody(
+function applyNewBody(
   factory: typescript.NodeFactory,
   node: typescript.FunctionLikeDeclaration,
   newBody: typescript.Block,

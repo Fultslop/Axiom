@@ -259,5 +259,3 @@ export default function createTransformer(
   };
 }
 
-// Named export required by ts-jest's astTransformers pipeline.
-export { createTransformer as factory };

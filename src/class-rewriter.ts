@@ -76,7 +76,7 @@ function filterConstructorPostTags(
   });
 }
 
-export function filterValidInvariants(
+function filterValidInvariants(
   expressions: string[],
   className: string,
   warn: (msg: string) => void,

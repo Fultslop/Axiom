@@ -1,7 +1,7 @@
 import typescript from 'typescript';
 import createTransformer from '@src/transformer';
 
-export type TransformOptions = {
+type TransformOptions = {
   warn?: (msg: string) => void;
   keepContracts?: boolean | 'pre' | 'post' | 'invariant' | 'all';
 };
