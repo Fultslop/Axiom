@@ -114,3 +114,101 @@ describe('keepContracts with class invariants', () => {
     expect(withDefault).toContain('checkInvariants');
   });
 });
+
+describe('keepContracts — require injection', () => {
+  it('emits require import when keepContracts: "all" and contracts are present', () => {
+    const source = `
+      /** @pre x > 0 */
+      export function inc(x: number): number { return x + 1; }
+    `;
+    const result = transform(source, { keepContracts: 'all' });
+    expect(result).toContain('require("@fultslop/axiom")');
+  });
+
+  it('does not emit require import when keepContracts filters all contracts out', () => {
+    // Function has only @pre; keepContracts: 'post' means nothing is emitted.
+    const source = `
+      /** @pre x > 0 */
+      export function inc(x: number): number { return x + 1; }
+    `;
+    const result = transform(source, { keepContracts: 'post' });
+    expect(result).not.toContain('require("@fultslop/axiom")');
+  });
+});
+
+describe('file-level @axiom keepContracts directive', () => {
+  it('directive with no qualifier enables "all", overriding global false', () => {
+    const source = `// @axiom keepContracts
+/**
+ * @pre x > 0
+ * @post result > 0
+ */
+export function double(x: number): number { return x * 2; }
+`;
+    const result = transform(source, { keepContracts: false });
+    expect(result).toContain('ContractViolationError("PRE", "x > 0"');
+    expect(result).toContain('ContractViolationError("POST", "result > 0"');
+  });
+
+  it('directive "pre" enables only pre, overriding global false', () => {
+    const source = `// @axiom keepContracts pre
+/**
+ * @pre x > 0
+ * @post result > 0
+ */
+export function double(x: number): number { return x * 2; }
+`;
+    const result = transform(source, { keepContracts: false });
+    expect(result).toContain('ContractViolationError("PRE", "x > 0"');
+    expect(result).not.toContain('ContractViolationError("POST"');
+    expect(result).not.toContain('__axiom_result__');
+  });
+
+  it('directive "post" enables only post, overriding global false', () => {
+    const source = `// @axiom keepContracts post
+/**
+ * @pre x > 0
+ * @post result > 0
+ */
+export function double(x: number): number { return x * 2; }
+`;
+    const result = transform(source, { keepContracts: false });
+    expect(result).not.toContain('ContractViolationError("PRE"');
+    expect(result).toContain('ContractViolationError("POST", "result > 0"');
+    expect(result).toContain('__axiom_result__');
+  });
+
+  it('file without directive and global false — no checks emitted (existing behaviour)', () => {
+    const source = `
+/** @pre x > 0 */
+export function inc(x: number): number { return x + 1; }
+`;
+    const baseline = transform(source);
+    const result = transform(source, { keepContracts: false });
+    expect(result).toBe(baseline);
+  });
+
+  it('directive on a non-first line is ignored', () => {
+    const source = `export const dummy = 1;
+// @axiom keepContracts
+/** @pre x > 0 */
+export function inc(x: number): number { return x + 1; }
+`;
+    // Directive is not on first line — it is ignored, global 'post' applies.
+    // A wrongly-detected directive would activate 'all' and emit the pre check.
+    const result = transform(source, { keepContracts: 'post' });
+    expect(result).not.toContain('ContractViolationError("PRE"');
+    // But the directive comment itself is preserved in output.
+    expect(result).toContain('// @axiom keepContracts');
+  });
+
+  it('unknown qualifier falls back to global option', () => {
+    const source = `// @axiom keepContracts foobar
+/** @pre x > 0 */
+export function inc(x: number): number { return x + 1; }
+`;
+    // Unknown qualifier → undefined → fall back to global 'post' → pre absent.
+    const result = transform(source, { keepContracts: 'post' });
+    expect(result).not.toContain('ContractViolationError("PRE"');
+  });
+});

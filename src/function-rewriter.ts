@@ -23,17 +23,6 @@ const KEEP_ALL = 'all' as const;
 
 export type KeepContracts = false | 'pre' | 'post' | 'invariant' | 'all';
 
-export function normaliseKeepContracts(
-  raw: boolean | 'pre' | 'post' | 'invariant' | 'all' | undefined,
-): KeepContracts {
-  if (raw === true) {
-    return KEEP_ALL;
-  }
-  if (!raw) {
-    return false;
-  }
-  return raw as KeepContracts;
-}
 
 export function shouldEmitPre(keepContracts: KeepContracts): boolean {
   if (keepContracts === false) {
