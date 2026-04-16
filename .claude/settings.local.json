@@ -8,12 +8,13 @@
       "Bash(node -e \"const ts = require\\('typescript'\\); const f = ts.factory; console.log\\(f.createImportClause.toString\\(\\).slice\\(0, 200\\)\\)\")",
       "Bash(node -e \"const ts = require\\('typescript'\\); const f = ts.factory; console.log\\(f.createImportClause.length\\); console.log\\(f.createImportClause.toString\\(\\).slice\\(0,600\\)\\)\")",
       "Bash(node -e \"const ts = require\\('typescript'\\); const f = ts.factory; const clause = f.createImportClause\\(undefined, undefined, f.createNamedImports\\([f.createImportSpecifier\\(false, undefined, f.createIdentifier\\('ContractViolationError'\\)\\)]\\)\\); console.log\\('isTypeOnly:', clause.isTypeOnly, 'phaseModifier:', clause.phaseModifier\\)\")",
-      "Bash(npm version:*)",      
+      "Bash(npm version:*)",
       "Bash(npx jest:*)",
       "Bash(grep -n \"isConstructor\\\\|Constructor\\\\|async\" /c/Users/lassc/Code/typescript/fsprepost/src/*.ts)",
       "Bash(grep -B 5 -A 10 \"constructor.*@pre\\\\|@pre.*constructor\" /c/Users/lassc/Code/typescript/fsprepost/test/*.ts)",
       "Bash(grep -i \"optional\\\\|rest\\\\|nullish\\\\|ternary\\\\|ChainExpression\" /c/Users/lassc/Code/typescript/fsprepost/docs/superpowers/**/*.md)",
-      "Bash(ls -la /c/Users/lassc/Code/typescript/fsprepost/*.md)"
+      "Bash(ls -la /c/Users/lassc/Code/typescript/fsprepost/*.md)",
+      "Bash(npm install *)"
     ]
   }
 }
