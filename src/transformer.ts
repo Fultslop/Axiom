@@ -1,6 +1,8 @@
 import typescript from 'typescript';
 import { buildReparsedIndex, type ReparsedIndex } from './reparsed-index';
-import { tryRewriteFunction, isPublicTarget } from './function-rewriter';
+import {
+  tryRewriteFunction, isPublicTarget, type KeepContracts,
+} from './function-rewriter';
 import { tryRewriteClass } from './class-rewriter';
 import { buildRequireStatement } from './require-injection';
 import type { ParamMismatchMode } from './interface-resolver';
@@ -10,6 +12,41 @@ import {
 } from './jsdoc-parser';
 
 const MODE_IGNORE = 'ignore' as const;
+const DIRECTIVE_PREFIX = '// @axiom keepContracts' as const;
+const DIRECTIVE_ALL = 'all' as const;
+const DIRECTIVE_PRE = 'pre' as const;
+const DIRECTIVE_POST = 'post' as const;
+const DIRECTIVE_INVARIANT = 'invariant' as const;
+
+// ---------------------------------------------------------------------------
+// File-level directive
+// ---------------------------------------------------------------------------
+
+function readFileDirective(
+  sourceFile: typescript.SourceFile,
+): KeepContracts | undefined {
+  const fullText = sourceFile.getFullText();
+  const lines = fullText.split('\n');
+  const firstLine = lines[0] ?? '';
+  const trimmed = firstLine.trim();
+  if (!trimmed.startsWith(DIRECTIVE_PREFIX)) {
+    return undefined;
+  }
+  const qualifier = trimmed.slice(DIRECTIVE_PREFIX.length).trim();
+  if (qualifier === '' || qualifier === DIRECTIVE_ALL) {
+    return DIRECTIVE_ALL;
+  }
+  if (qualifier === DIRECTIVE_PRE) {
+    return DIRECTIVE_PRE;
+  }
+  if (qualifier === DIRECTIVE_POST) {
+    return DIRECTIVE_POST;
+  }
+  if (qualifier === DIRECTIVE_INVARIANT) {
+    return DIRECTIVE_INVARIANT;
+  }
+  return undefined;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -98,11 +135,12 @@ function visitNode(
   reparsedCache: Map<string, typescript.SourceFile>,
   paramMismatch: ParamMismatchMode,
   allowIdentifiers: string[],
+  keepContracts: KeepContracts,
 ): typescript.Node {
   if (typescript.isClassDeclaration(node)) {
     return tryRewriteClass(
       factory, node, reparsedIndex, transformed, warn,
-      checker, reparsedCache, paramMismatch, allowIdentifiers,
+      checker, reparsedCache, paramMismatch, allowIdentifiers, keepContracts,
     );
   }
 
@@ -122,12 +160,13 @@ function visitNode(
       [],
       undefined,
       allowIdentifiers,
+      keepContracts,
     );
     return typescript.visitEachChild(
       rewritten,
       (child) => visitNode(
         factory, child, context, reparsedIndex, transformed, warn,
-        checker, reparsedCache, paramMismatch, allowIdentifiers,
+        checker, reparsedCache, paramMismatch, allowIdentifiers, keepContracts,
       ),
       context,
     );
@@ -148,10 +187,19 @@ function visitNode(
     node,
     (child) => visitNode(
       factory, child, context, reparsedIndex, transformed, warn,
-      checker, reparsedCache, paramMismatch, allowIdentifiers,
+      checker, reparsedCache, paramMismatch, allowIdentifiers, keepContracts,
     ),
     context,
   );
+}
+
+function resolveKeepContracts(
+  raw: boolean | 'pre' | 'post' | 'invariant' | 'all' | undefined,
+): KeepContracts {
+  if (raw === true) {
+    return 'all';
+  }
+  return raw || false;
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +214,7 @@ export default function createTransformer(
     warn?: (msg: string) => void;
     interfaceParamMismatch?: 'rename' | 'ignore';
     allowIdentifiers?: string[];
+    keepContracts?: boolean | 'pre' | 'post' | 'invariant' | 'all';
   },
 ): typescript.TransformerFactory<typescript.SourceFile> {
   const warn = options?.warn ?? ((msg: string): void => {
@@ -175,6 +224,7 @@ export default function createTransformer(
   const paramMismatch: ParamMismatchMode = rawMode === MODE_IGNORE ? 'ignore' : 'rename';
   const checker = _program?.getTypeChecker?.();
   const allowIdentifiers = options?.allowIdentifiers ?? [];
+  const keepContracts = resolveKeepContracts(options?.keepContracts);
   const reparsedCache = new Map<string, typescript.SourceFile>();
 
   return (context: typescript.TransformationContext) => {
@@ -183,6 +233,10 @@ export default function createTransformer(
     const { factory } = context;
 
     return (sourceFile: typescript.SourceFile): typescript.SourceFile => {
+      const fileDirective = readFileDirective(sourceFile);
+      const effectiveKeepContracts: KeepContracts = fileDirective !== undefined
+        ? fileDirective
+        : keepContracts;
       const reparsedIndex = buildReparsedIndex(sourceFile);
       const transformed = { value: false };
       const visited = typescript.visitEachChild(
@@ -190,6 +244,7 @@ export default function createTransformer(
         (node) => visitNode(
           factory, node, context, reparsedIndex, transformed, warn,
           checker, reparsedCache, paramMismatch, allowIdentifiers,
+          effectiveKeepContracts,
         ),
         context,
       );
@@ -204,5 +259,3 @@ export default function createTransformer(
   };
 }
 
-// Named export required by ts-jest's astTransformers pipeline.
-export { createTransformer as factory };

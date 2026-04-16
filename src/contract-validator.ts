@@ -1,12 +1,12 @@
 import typescript from 'typescript';
 
-export type ValidationErrorKind =
+type ValidationErrorKind =
   | 'assignment-in-expression'
   | 'unknown-identifier'
   | 'type-mismatch';
 
-export type SimpleType = 'number' | 'string' | 'boolean';
-export type TypeMapValue = SimpleType | 'non-primitive';
+type SimpleType = 'number' | 'string' | 'boolean';
+type TypeMapValue = SimpleType | 'non-primitive';
 
 const TYPE_NUMBER: SimpleType = 'number';
 const TYPE_STRING: SimpleType = 'string';
@@ -14,7 +14,7 @@ const TYPE_BOOLEAN: SimpleType = 'boolean';
 const TYPE_NON_PRIMITIVE: TypeMapValue = 'non-primitive';
 const ROOT_THIS = 'this';
 
-export interface ValidationError {
+interface ValidationError {
   kind: ValidationErrorKind;
   expression: string;
   location: string;

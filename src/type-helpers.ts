@@ -5,7 +5,7 @@ export type SimpleType = 'number' | 'string' | 'boolean';
 const TYPE_NON_PRIMITIVE = 'non-primitive' as const;
 export type TypeMapValue = SimpleType | typeof TYPE_NON_PRIMITIVE;
 
-export function simpleTypeFromFlags(flags: number): SimpleType | undefined {
+function simpleTypeFromFlags(flags: number): SimpleType | undefined {
   /* eslint-disable no-bitwise */
   if (flags & typescript.TypeFlags.NumberLike) {
     return 'number';
@@ -20,7 +20,7 @@ export function simpleTypeFromFlags(flags: number): SimpleType | undefined {
   return undefined;
 }
 
-export function resolveSimpleType(
+function resolveSimpleType(
   paramType: typescript.Type,
   _checker: typescript.TypeChecker,
 ): TypeMapValue | undefined {
