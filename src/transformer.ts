@@ -106,7 +106,7 @@ function visitNode(
   if (typescript.isClassDeclaration(node)) {
     return tryRewriteClass(
       factory, node, reparsedIndex, transformed, warn,
-      checker, reparsedCache, paramMismatch, allowIdentifiers,
+      checker, reparsedCache, paramMismatch, allowIdentifiers, keepContracts,
     );
   }
 

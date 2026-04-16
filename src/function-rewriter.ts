@@ -35,7 +35,7 @@ export function normaliseKeepContracts(
   return raw as KeepContracts;
 }
 
-function shouldEmitPre(keepContracts: KeepContracts): boolean {
+export function shouldEmitPre(keepContracts: KeepContracts): boolean {
   if (keepContracts === false) {
     return true;
   }
@@ -48,7 +48,7 @@ function shouldEmitPre(keepContracts: KeepContracts): boolean {
   return false;
 }
 
-function shouldEmitPost(keepContracts: KeepContracts): boolean {
+export function shouldEmitPost(keepContracts: KeepContracts): boolean {
   if (keepContracts === false) {
     return true;
   }
@@ -61,7 +61,7 @@ function shouldEmitPost(keepContracts: KeepContracts): boolean {
   return false;
 }
 
-function shouldEmitInvariant(keepContracts: KeepContracts): boolean {
+export function shouldEmitInvariant(keepContracts: KeepContracts): boolean {
   if (keepContracts === false) {
     return true;
   }

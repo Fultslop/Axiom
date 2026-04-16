@@ -66,8 +66,13 @@ export function transpileWithWarn(source: string, warn: (msg: string) => void): 
   return transform(source, warn);
 }
 
-export function transformES2022(source: string, warn?: (msg: string) => void): string {
-  const opts = warn !== undefined ? { warn } : undefined;
+export function transformES2022(
+  source: string,
+  optionsOrWarn?: ((msg: string) => void) | TransformOptions,
+): string {
+  const opts = typeof optionsOrWarn === 'function'
+    ? { warn: optionsOrWarn }
+    : optionsOrWarn;
   return typescript.transpileModule(source, {
     compilerOptions: {
       target: typescript.ScriptTarget.ES2022,
