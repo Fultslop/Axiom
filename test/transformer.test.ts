@@ -505,3 +505,45 @@ describe('async result type mismatch detection', () => {
     expect(warnings).toHaveLength(0);
   });
 });
+
+describe('async class method post-condition', () => {
+  it('checks resolved value for @post result !== null on async method', async () => {
+    const source = `
+      interface User { id: number }
+      export class Repo {
+        /**
+         * @post result !== null
+         */
+        async find(id: number): Promise<User | null> {
+          return Promise.resolve(null);
+        }
+      }
+    `;
+    const warnings: string[] = [];
+    const js = transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(js).toContain('await');
+    expect(js).toContain('async ()');
+    const RepoClass = evalTransformedWith(js, 'Repo') as new () => { find: (id: number) => Promise<unknown> };
+    const repo = new RepoClass();
+    await expect(repo.find(1)).rejects.toThrow();
+  });
+
+  it('invariant fires after await resolves, not on unresolved promise', async () => {
+    const source = `
+      /**
+       * @invariant this.count >= 0
+       */
+      export class Counter {
+        count = 0;
+        async increment(): Promise<void> {
+          this.count += 1;
+        }
+      }
+    `;
+    const warnings: string[] = [];
+    const js = transformWithProgram(source, (msg) => warnings.push(msg));
+    const CounterClass = evalTransformedWith(js, 'Counter') as new () => { increment: () => Promise<void> };
+    const counter = new CounterClass();
+    await expect(counter.increment()).resolves.toBeUndefined();
+  });
+});

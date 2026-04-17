@@ -1,5 +1,7 @@
 # Async Functions — Task 4: Async class methods
 
+Status: Done
+
 > **Sequence:** This is step 4 of 6. Tasks 1, 2, and 3 must be complete before starting this task.
 > **For agentic workers:** Use `superpowers:executing-plans` to implement this task.
 
