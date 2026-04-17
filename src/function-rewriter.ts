@@ -538,6 +538,7 @@ function rewriteFunction(
   interfaceMethodContracts?: InterfaceMethodContracts,
   allowIdentifiers: string[] = [],
   keepContracts: KeepContracts = false,
+  locationNode?: typescript.FunctionLikeDeclaration,
 ): typescript.FunctionLikeDeclaration | null {
   const originalBody = node.body;
   if (!originalBody || !typescript.isBlock(originalBody)) {
@@ -546,7 +547,7 @@ function rewriteFunction(
 
   const reparsedNode = reparsedFunctions.get(node.pos) ?? node;
 
-  const location = buildLocationName(node);
+  const location = buildLocationName(locationNode ?? node);
   const preKnown = buildKnownIdentifiers(node, false);
   const postKnown = buildKnownIdentifiers(node, true);
   const exportedNames = mergeIdentifiers(preKnown, postKnown, checker, node, allowIdentifiers);
@@ -587,11 +588,13 @@ export function tryRewriteFunction(
   interfaceMethodContracts?: InterfaceMethodContracts,
   allowIdentifiers: string[] = [],
   keepContracts: KeepContracts = false,
+  locationNode?: typescript.FunctionLikeDeclaration,
 ): typescript.FunctionLikeDeclaration {
   try {
     const rewritten = rewriteFunction(
       factory, node, reparsedFunctions, warn, checker,
       invariantExpressions, interfaceMethodContracts, allowIdentifiers, keepContracts,
+      locationNode,
     );
     if (rewritten === null) {
       return node;

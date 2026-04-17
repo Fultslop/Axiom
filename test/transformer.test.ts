@@ -49,6 +49,18 @@ describe('keepContracts option', () => {
   });
 });
 
+describe('location string for arrow function', () => {
+  it('uses the variable name in the ContractError message', () => {
+    const source = `
+      export const validate = /** @pre x > 0 */ (x: number): boolean => x > 0;
+    `;
+    const compiled = transform(source);
+    expect(compiled).toContain('ContractViolationError');
+    expect(compiled).toContain('"validate"');
+    expect(compiled).not.toContain('"anonymous"');
+  });
+});
+
 describe('keepContracts with class invariants', () => {
   it('keepContracts: "invariant" — invariant call emitted, pre absent', () => {
     const source = `

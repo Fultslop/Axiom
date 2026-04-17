@@ -172,6 +172,7 @@ function rewriteVariableDeclaration(
     undefined,
     allowIdentifiers,
     keepContracts,
+    init,
   );
   if (rewritten === funcNode) {
     return decl;
