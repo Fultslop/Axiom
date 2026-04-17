@@ -547,3 +547,28 @@ describe('async class method post-condition', () => {
     await expect(counter.increment()).resolves.toBeUndefined();
   });
 });
+
+describe('@prev with async method', () => {
+  it('captures prev before await and compares against resolved result', async () => {
+    const source = `
+      export class Queue {
+        length = 0;
+        /**
+         * @post result > prev.length
+         */
+        async push(item: string): Promise<number> {
+          this.length += 1;
+          return Promise.resolve(this.length);
+        }
+      }
+    `;
+    const warnings: string[] = [];
+    const js = transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(warnings).toHaveLength(0);
+    const QueueClass = evalTransformedWith(
+      js, 'Queue',
+    ) as new () => { push: (item: string) => Promise<number> };
+    const queue = new QueueClass();
+    await expect(queue.push('a')).resolves.toBe(1);
+  });
+});

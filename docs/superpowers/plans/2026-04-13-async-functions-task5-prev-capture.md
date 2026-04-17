@@ -1,5 +1,7 @@
 # Async Functions — Task 5: `@prev` with async method regression
 
+Status: Done
+
 > **Sequence:** This is step 5 of 6. Tasks 1–4 must be complete before starting this task.
 > **For agentic workers:** Use `superpowers:executing-plans` to implement this task.
 
@@ -39,7 +41,7 @@ No source files change; ESLint constraints do not apply.
 
 ## Steps
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 Add to `test/transformer.test.ts`:
 
@@ -61,16 +63,16 @@ describe('@prev with async method', () => {
     const warnings: string[] = [];
     const js = transformWithProgram(source, (msg) => warnings.push(msg));
     expect(warnings).toHaveLength(0);
-    const QueueClass = evalTransformed<new () => { push: (item: string) => Promise<number> }>(
+    const QueueClass = evalTransformedWith(
       js, 'Queue',
-    );
+    ) as new () => { push: (item: string) => Promise<number> };
     const queue = new QueueClass();
     await expect(queue.push('a')).resolves.toBe(1);
   });
 });
 ```
 
-- [ ] **Step 2: Run the test**
+- [x] **Step 2: Run the test**
 
 ```
 npx jest --testPathPattern="transformer" -t "@prev with async method" --no-coverage
@@ -78,7 +80,7 @@ npx jest --testPathPattern="transformer" -t "@prev with async method" --no-cover
 
 Expected: PASS.
 
-- [ ] **Step 3: Run full suite**
+- [x] **Step 3: Run full suite**
 
 ```
 npm test
