@@ -1,5 +1,7 @@
 # Async Functions — Task 6: Final checks — regression, coverage, lint, typecheck
 
+Status: Done
+
 > **Sequence:** This is step 6 of 6. Tasks 1–5 must be complete before starting this task.
 > **For agentic workers:** Use `superpowers:executing-plans` to implement this task.
 
