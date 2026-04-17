@@ -1,5 +1,7 @@
 # Async Functions — Task 3: `buildPostParamTypes` unwraps `Promise<T>` for result type checking
 
+Status: In Progress
+
 > **Sequence:** This is step 3 of 6. Tasks 1 and 2 must be complete before starting this task.
 > **For agentic workers:** Use `superpowers:executing-plans` to implement this task.
 

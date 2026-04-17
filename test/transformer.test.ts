@@ -465,3 +465,43 @@ describe('async void return type — @post result drop', () => {
     ).toBe(false);
   });
 });
+
+describe('async result type mismatch detection', () => {
+  it('warns for @post result === "ok" when async return is Promise<number>', () => {
+    const source = `
+      /**
+       * @post result === "ok"
+       */
+      export async function getCount(): Promise<number> { return Promise.resolve(1); }
+    `;
+    const warnings: string[] = [];
+    transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(
+      warnings.some((w) => w.includes('type mismatch') && w.includes('result')),
+    ).toBe(true);
+  });
+
+  it('does not warn for @post result > 0 when async return is Promise<number>', () => {
+    const source = `
+      /**
+       * @post result > 0
+       */
+      export async function getCount(): Promise<number> { return Promise.resolve(1); }
+    `;
+    const warnings: string[] = [];
+    transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(warnings).toHaveLength(0);
+  });
+
+  it('does not warn for @post result !== null when async return is Promise<string>', () => {
+    const source = `
+      /**
+       * @post result !== null
+       */
+      export async function getName(): Promise<string> { return Promise.resolve(''); }
+    `;
+    const warnings: string[] = [];
+    transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(warnings).toHaveLength(0);
+  });
+});
