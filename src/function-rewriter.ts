@@ -95,10 +95,39 @@ export function expressionUsesResult(expression: string): boolean {
   }
 }
 
+const PROMISE_TYPE = 'Promise' as const;
+
+function resolvePromiseTypeArg(
+  typeNode: typescript.TypeNode,
+): typescript.SyntaxKind | undefined {
+  if (!typescript.isTypeReferenceNode(typeNode)) {
+    return undefined;
+  }
+  const typeName = typescript.isIdentifier(typeNode.typeName)
+    ? typeNode.typeName.text
+    : undefined;
+  if (typeName !== PROMISE_TYPE) {
+    return undefined;
+  }
+  const args = typeNode.typeArguments;
+  if (args === undefined || args.length !== 1) {
+    return undefined;
+  }
+  const inner = args[0]!.kind;
+  if (
+    inner === typescript.SyntaxKind.VoidKeyword ||
+    inner === typescript.SyntaxKind.NeverKeyword ||
+    inner === typescript.SyntaxKind.UndefinedKeyword
+  ) {
+    return inner;
+  }
+  return undefined;
+}
+
 function returnTypeDescription(node: typescript.FunctionLikeDeclaration): string | undefined {
   const typeNode = node.type;
   if (typeNode === undefined) {
-    return undefined; // no annotation at all
+    return undefined;
   }
   if (
     typeNode.kind === typescript.SyntaxKind.VoidKeyword ||
@@ -106,6 +135,10 @@ function returnTypeDescription(node: typescript.FunctionLikeDeclaration): string
     typeNode.kind === typescript.SyntaxKind.UndefinedKeyword
   ) {
     return typescript.tokenToString(typeNode.kind) ?? 'void';
+  }
+  const innerKind = resolvePromiseTypeArg(typeNode);
+  if (innerKind !== undefined) {
+    return typescript.tokenToString(innerKind) ?? 'void';
   }
   return RETURN_TYPE_OK;
 }

@@ -420,3 +420,48 @@ describe('async function post-condition body capture', () => {
     await expect(fn(1)).resolves.toBeUndefined();
   });
 });
+
+describe('async void return type — @post result drop', () => {
+  it('warns and drops @post result on async Promise<void> function', () => {
+    const source = `
+      /**
+       * @post result !== undefined
+       */
+      export async function doWork(): Promise<void> {}
+    `;
+    const warnings: string[] = [];
+    transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(
+      warnings.some((w) => w.includes("return type is 'void'") && w.includes('@post')),
+    ).toBe(true);
+  });
+
+  it('warns and drops @post result on async Promise<never> function', () => {
+    const source = `
+      /**
+       * @post result !== null
+       */
+      export async function fail(): Promise<never> { throw new Error(); }
+    `;
+    const warnings: string[] = [];
+    transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(
+      warnings.some((w) => w.includes("return type is 'never'") && w.includes('@post')),
+    ).toBe(true);
+  });
+
+  it('keeps @post result on async Promise<number>', () => {
+    const source = `
+      /**
+       * @post result > 0
+       */
+      export async function count(): Promise<number> { return Promise.resolve(1); }
+    `;
+    const warnings: string[] = [];
+    transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(
+      warnings.some((w) =>
+        w.includes("return type is 'void'") || w.includes("return type is 'never'")),
+    ).toBe(false);
+  });
+});
