@@ -12,7 +12,7 @@ Each entry: priority, plan file, suggested git commit message.
 4. [done] `2026-04-13-constructor-contracts.md` — `feat: support @pre/@post contracts on constructors`
 5. [done] `2026-04-13-release-contracts.md` — `feat: add keepContracts option for release-build contract retention`
 6. [done]`2026-04-13-arrow-functions.md` — `feat: support @pre/@post on exported arrow and function-expression constants`
-7. [in progress 3/6]`2026-04-13-async-functions.md` — `fix: await async function body before checking @post result`
+7. [in progress 4/6]`2026-04-13-async-functions.md` — `fix: await async function body before checking @post result`
 8. `2026-04-13-closures.md` — `feat: support @pre/@post on nested and closure functions` *(depends on #6)*
 9. `2026-04-13-class-inheritance.md` — `feat: inherit @pre/@post contracts from base classes via extends`
 10. `future-liskov-aware-contracts.md` — `feat: heuristic LSP violation detection for subtype @pre constraints` *(depends on #9)*
