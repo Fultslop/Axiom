@@ -332,6 +332,7 @@ function buildGuardedStatements(
   prevCapture: string | null,
   exportedNames: Set<string>,
   keepContracts: KeepContracts,
+  isAsync: boolean,
 ): typescript.Statement[] {
   const statements: typescript.Statement[] = [];
 
@@ -347,7 +348,7 @@ function buildGuardedStatements(
     if (prevCapture !== null) {
       statements.push(buildPrevCapture(prevCapture, factory));
     }
-    statements.push(buildBodyCapture(originalBody.statements, factory));
+    statements.push(buildBodyCapture(originalBody.statements, factory, isAsync));
     for (const tag of activePost) {
       statements.push(buildPostCheck(tag.expression, location, factory, exportedNames));
     }
@@ -443,6 +444,13 @@ function isStaticMethod(node: typescript.FunctionLikeDeclaration): boolean {
     ? typescript.getModifiers(node) ?? []
     : [];
   return modifiers.some((mod) => mod.kind === typescript.SyntaxKind.StaticKeyword);
+}
+
+function isAsyncFunction(node: typescript.FunctionLikeDeclaration): boolean {
+  const modifiers = typescript.canHaveModifiers(node)
+    ? typescript.getModifiers(node) ?? []
+    : [];
+  return modifiers.some((mod) => mod.kind === typescript.SyntaxKind.AsyncKeyword);
 }
 
 function buildInvariantCallIfNeeded(
@@ -579,9 +587,11 @@ function rewriteFunction(
     return null;
   }
 
+  const asyncFlag = isAsyncFunction(node);
+
   const newStatements = buildGuardedStatements(
     factory, preTags, postTags, originalBody, location, invariantCall,
-    prevCapture, exportedNames, keepContracts,
+    prevCapture, exportedNames, keepContracts, asyncFlag,
   );
   return applyNewBody(factory, node, factory.createBlock(newStatements, true));
 }

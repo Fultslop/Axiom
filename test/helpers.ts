@@ -1,5 +1,8 @@
 import typescript from 'typescript';
 import createTransformer from '@src/transformer';
+import { ContractViolationError } from '@src/contract-violation-error';
+import { InvariantViolationError } from '@src/invariant-violation-error';
+import { snapshot, deepSnapshot } from '@src/assertions';
 
 type TransformOptions = {
   warn?: (msg: string) => void;
@@ -80,4 +83,24 @@ export function transformES2022(
     },
     transformers: { before: [createTransformer(undefined, opts)] },
   }).outputText;
+}
+
+const axiomModules: Record<string, unknown> = {
+  '@fultslop/axiom': { ContractViolationError, InvariantViolationError, snapshot, deepSnapshot },
+};
+
+function mockRequire(pkg: string): unknown {
+  const resolved = axiomModules[pkg];
+  if (resolved === undefined) {
+    throw new Error(`evalTransformedWith: unmapped require("${pkg}")`);
+  }
+  return resolved;
+}
+
+export function evalTransformedWith(js: string, exportName: string): unknown {
+  const exports: Record<string, unknown> = {};
+  const mod = { exports };
+  // eslint-disable-next-line no-new-func
+  new Function('exports', 'module', 'require', js)(exports, mod, mockRequire);
+  return mod.exports[exportName];
 }

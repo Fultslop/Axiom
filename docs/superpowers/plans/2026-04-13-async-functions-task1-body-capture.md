@@ -1,5 +1,7 @@
 # Async Functions — Task 1: `isAsyncFunction` helper and `buildBodyCapture` async path
 
+State: implemented
+
 > **Sequence:** This is step 1 of 6. No prior tasks required.
 > **For agentic workers:** Use `superpowers:executing-plans` to implement this task.
 

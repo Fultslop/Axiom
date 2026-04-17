@@ -1,4 +1,4 @@
-import { transform, transformES2022 } from './helpers';
+import { transform, transformES2022, transformWithProgram, evalTransformedWith } from './helpers';
 
 describe('keepContracts option', () => {
   const sourcePreAndPost = `
@@ -368,5 +368,55 @@ describe('VariableStatement with multiple declarations', () => {
     expect(compiled).toContain('alpha');
     expect(compiled).toContain('ContractViolationError');
     expect(compiled).toContain('x > 0');
+  });
+});
+
+describe('async function post-condition body capture', () => {
+  it('checks resolved value for @post result !== null on async function', async () => {
+    const source = `
+      interface User { id: number }
+      /**
+       * @post result !== null
+       */
+      export async function findUser(id: number): Promise<User | null> {
+        return Promise.resolve(null);
+      }
+    `;
+    const warnings: string[] = [];
+    const js = transformWithProgram(source, (msg) => warnings.push(msg));
+    // The transformed function must be async and await the IIFE
+    expect(js).toContain('await');
+    expect(js).toContain('async ()');
+    // Invoking it should throw because null !== null is false (i.e. result IS null)
+    const fn = evalTransformedWith(js, 'findUser') as (id: number) => Promise<unknown>;
+    await expect(fn(1)).rejects.toThrow();
+  });
+
+  it('does not wrap synchronous function body in await', () => {
+    const source = `
+      /**
+       * @post result > 0
+       */
+      export function count(): number { return 1; }
+    `;
+    const warnings: string[] = [];
+    const js = transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(js).not.toContain('await (async');
+  });
+
+  it('@pre fires synchronously before async body', async () => {
+    const source = `
+      /**
+       * @pre id > 0
+       */
+      export async function findUser(id: number): Promise<void> {
+        return Promise.resolve();
+      }
+    `;
+    const warnings: string[] = [];
+    const js = transformWithProgram(source, (msg) => warnings.push(msg));
+    const fn = evalTransformedWith(js, 'findUser') as (id: number) => Promise<void>;
+    await expect(fn(0)).rejects.toThrow();
+    await expect(fn(1)).resolves.toBeUndefined();
   });
 });
