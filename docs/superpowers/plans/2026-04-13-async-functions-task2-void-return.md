@@ -1,6 +1,6 @@
 # Async Functions — Task 2: `returnTypeDescription` unwraps `Promise<void|never|undefined>`
 
-Status: in progress
+Status: Done
 
 > **Sequence:** This is step 2 of 6. Task 1 must be complete before starting this task.
 > **For agentic workers:** Use `superpowers:executing-plans` to implement this task.
