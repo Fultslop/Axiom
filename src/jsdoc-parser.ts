@@ -79,7 +79,7 @@ export function extractContractTagsFromNode(node: typescript.Node): ContractTag[
   return result;
 }
 
-export function extractContractTagsForFunctionLike(
+function extractContractTagsForFunctionLike(
   node: typescript.FunctionLikeDeclaration,
 ): ContractTag[] {
   const direct = extractContractTagsFromNode(node);

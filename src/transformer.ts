@@ -250,40 +250,36 @@ function visitNode(
 
   emitMisuseWarnings(node, warn);
 
-  if (
-    typescript.isFunctionDeclaration(node) &&
-    isPublicTarget(node)
-  ) {
-    const rewritten = tryRewriteFunction(
-      factory,
-      node,
-      reparsedIndex.functions,
-      transformed,
-      warn,
-      checker,
-      [],
-      undefined,
-      allowIdentifiers,
-      keepContracts,
-    );
-    return typescript.visitEachChild(
-      rewritten,
-      (child) => visitNode(
-        factory, child, context, reparsedIndex, transformed, warn,
-        checker, reparsedCache, paramMismatch, allowIdentifiers, keepContracts,
-      ),
-      context,
-    );
-  }
-
-  if (
-    typescript.isFunctionDeclaration(node) &&
-    !isPublicTarget(node)
-  ) {
+  if (typescript.isFunctionDeclaration(node)) {
+    if (isPublicTarget(node)) {
+      const rewritten = tryRewriteFunction(
+        factory,
+        node,
+        reparsedIndex.functions,
+        transformed,
+        warn,
+        checker,
+        [],
+        undefined,
+        allowIdentifiers,
+        keepContracts,
+      );
+      return typescript.visitEachChild(
+        rewritten,
+        (child) => visitNode(
+          factory, child, context, reparsedIndex, transformed, warn,
+          checker, reparsedCache, paramMismatch, allowIdentifiers, keepContracts,
+        ),
+        context,
+      );
+    }
     emitUnsupportedClosureWarning(node, warn);
   }
 
-  if (typescript.isArrowFunction(node) || typescript.isFunctionExpression(node)) {
+  if (
+    (typescript.isArrowFunction(node) || typescript.isFunctionExpression(node)) &&
+    node.parent?.kind !== typescript.SyntaxKind.VariableDeclaration
+  ) {
     emitUnsupportedExpressionWarning(node, warn);
   }
 
