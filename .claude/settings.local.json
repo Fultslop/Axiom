@@ -14,7 +14,8 @@
       "Bash(grep -B 5 -A 10 \"constructor.*@pre\\\\|@pre.*constructor\" /c/Users/lassc/Code/typescript/fsprepost/test/*.ts)",
       "Bash(grep -i \"optional\\\\|rest\\\\|nullish\\\\|ternary\\\\|ChainExpression\" /c/Users/lassc/Code/typescript/fsprepost/docs/superpowers/**/*.md)",
       "Bash(ls -la /c/Users/lassc/Code/typescript/fsprepost/*.md)",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Bash(node -e ' *)"
     ]
   }
 }

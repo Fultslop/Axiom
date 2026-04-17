@@ -362,6 +362,26 @@ function buildGuardedStatements(
   return statements;
 }
 
+export function normaliseArrowBody(
+  factory: typescript.NodeFactory,
+  node: typescript.ArrowFunction,
+): typescript.ArrowFunction {
+  if (typescript.isBlock(node.body)) {
+    return node;
+  }
+  const returnStmt = factory.createReturnStatement(node.body);
+  const block = factory.createBlock([returnStmt], /* multiLine */ true);
+  return factory.updateArrowFunction(
+    node,
+    typescript.getModifiers(node),
+    node.typeParameters,
+    node.parameters,
+    node.type,
+    node.equalsGreaterThanToken,
+    block,
+  );
+}
+
 function applyNewBody(
   factory: typescript.NodeFactory,
   node: typescript.FunctionLikeDeclaration,
@@ -382,6 +402,29 @@ function applyNewBody(
   }
   if (typescript.isFunctionDeclaration(node)) {
     return factory.updateFunctionDeclaration(
+      node,
+      typescript.getModifiers(node),
+      node.asteriskToken,
+      node.name,
+      node.typeParameters,
+      node.parameters,
+      node.type,
+      newBody,
+    );
+  }
+  if (typescript.isArrowFunction(node)) {
+    return factory.updateArrowFunction(
+      node,
+      typescript.getModifiers(node),
+      node.typeParameters,
+      node.parameters,
+      node.type,
+      node.equalsGreaterThanToken,
+      newBody,
+    );
+  }
+  if (typescript.isFunctionExpression(node)) {
+    return factory.updateFunctionExpression(
       node,
       typescript.getModifiers(node),
       node.asteriskToken,
@@ -442,6 +485,18 @@ function shouldSkipRewrite(
   return preTags.length === 0 && postTags.length === 0 && invariantCall === null;
 }
 
+function noContractsToEmit(
+  preTags: ContractTag[],
+  postTags: ContractTag[],
+  invariantCall: typescript.ExpressionStatement | null,
+  keepContracts: KeepContracts,
+): boolean {
+  return (
+    shouldSkipRewrite(preTags, postTags, invariantCall) ||
+    allContractsFiltered(preTags, postTags, invariantCall, keepContracts)
+  );
+}
+
 function extractAndFilterTags(
   node: typescript.FunctionLikeDeclaration,
   reparsedNode: typescript.FunctionLikeDeclaration,
@@ -495,6 +550,7 @@ function rewriteFunction(
   interfaceMethodContracts?: InterfaceMethodContracts,
   allowIdentifiers: string[] = [],
   keepContracts: KeepContracts = false,
+  locationNode: typescript.FunctionLikeDeclaration = node,
 ): typescript.FunctionLikeDeclaration | null {
   const originalBody = node.body;
   if (!originalBody || !typescript.isBlock(originalBody)) {
@@ -503,7 +559,7 @@ function rewriteFunction(
 
   const reparsedNode = reparsedFunctions.get(node.pos) ?? node;
 
-  const location = buildLocationName(node);
+  const location = buildLocationName(locationNode);
   const preKnown = buildKnownIdentifiers(node, false);
   const postKnown = buildKnownIdentifiers(node, true);
   const exportedNames = mergeIdentifiers(preKnown, postKnown, checker, node, allowIdentifiers);
@@ -519,10 +575,7 @@ function rewriteFunction(
     factory, node, location, invariantExpressions,
   );
 
-  if (
-    shouldSkipRewrite(preTags, postTags, invariantCall) ||
-    allContractsFiltered(preTags, postTags, invariantCall, keepContracts)
-  ) {
+  if (noContractsToEmit(preTags, postTags, invariantCall, keepContracts)) {
     return null;
   }
 
@@ -544,11 +597,13 @@ export function tryRewriteFunction(
   interfaceMethodContracts?: InterfaceMethodContracts,
   allowIdentifiers: string[] = [],
   keepContracts: KeepContracts = false,
+  locationNode?: typescript.FunctionLikeDeclaration,
 ): typescript.FunctionLikeDeclaration {
   try {
     const rewritten = rewriteFunction(
       factory, node, reparsedFunctions, warn, checker,
       invariantExpressions, interfaceMethodContracts, allowIdentifiers, keepContracts,
+      locationNode,
     );
     if (rewritten === null) {
       return node;

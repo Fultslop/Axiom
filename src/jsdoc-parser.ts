@@ -79,10 +79,30 @@ export function extractContractTagsFromNode(node: typescript.Node): ContractTag[
   return result;
 }
 
+function extractContractTagsForFunctionLike(
+  node: typescript.FunctionLikeDeclaration,
+): ContractTag[] {
+  const direct = extractContractTagsFromNode(node);
+  if (direct.length > 0) {
+    return direct;
+  }
+  // For ArrowFunction / FunctionExpression the JSDoc comment is attached to
+  // the enclosing VariableStatement, not to the function node itself.
+  if (
+    (typescript.isArrowFunction(node) || typescript.isFunctionExpression(node)) &&
+    typescript.isVariableDeclaration(node.parent) &&
+    typescript.isVariableDeclarationList(node.parent.parent) &&
+    typescript.isVariableStatement(node.parent.parent.parent)
+  ) {
+    return extractContractTagsFromNode(node.parent.parent.parent);
+  }
+  return [];
+}
+
 export function extractContractTags(
   node: typescript.FunctionLikeDeclaration,
 ): ContractTag[] {
-  return extractContractTagsFromNode(node);
+  return extractContractTagsForFunctionLike(node);
 }
 
 export function extractPrevExpression(node: typescript.Node): string | undefined {

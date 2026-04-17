@@ -1,7 +1,7 @@
 import typescript from 'typescript';
 import { buildReparsedIndex, type ReparsedIndex } from './reparsed-index';
 import {
-  tryRewriteFunction, isPublicTarget, type KeepContracts,
+  tryRewriteFunction, isPublicTarget, normaliseArrowBody, type KeepContracts,
 } from './function-rewriter';
 import { tryRewriteClass } from './class-rewriter';
 import { buildRequireStatement } from './require-injection';
@@ -10,6 +10,7 @@ import {
   extractContractTagsFromNode,
   extractInvariantExpressions,
 } from './jsdoc-parser';
+import { isExportedVariableInitialiser } from './node-helpers';
 
 const MODE_IGNORE = 'ignore' as const;
 const DIRECTIVE_PREFIX = '// @axiom keepContracts' as const;
@@ -120,6 +121,109 @@ function emitUnsupportedExpressionWarning(
   }
 }
 
+function isExportedStatement(node: typescript.Node): boolean {
+  const mods = typescript.canHaveModifiers(node)
+    ? typescript.getModifiers(node) ?? []
+    : [];
+  return mods.some((mod) => mod.kind === typescript.SyntaxKind.ExportKeyword);
+}
+
+// ---------------------------------------------------------------------------
+// Variable declaration helpers
+// ---------------------------------------------------------------------------
+
+function rewriteVariableDeclaration(
+  factory: typescript.NodeFactory,
+  decl: typescript.VariableDeclaration,
+  reparsedIndex: ReparsedIndex,
+  transformed: { value: boolean },
+  warn: (msg: string) => void,
+  checker: typescript.TypeChecker | undefined,
+  allowIdentifiers: string[],
+  keepContracts: KeepContracts,
+): typescript.VariableDeclaration {
+  const init = decl.initializer;
+  if (init === undefined) {
+    return decl;
+  }
+  if (
+    !typescript.isArrowFunction(init) &&
+    !typescript.isFunctionExpression(init)
+  ) {
+    return decl;
+  }
+  if (!isExportedVariableInitialiser(init)) {
+    return decl;
+  }
+  let funcNode: typescript.FunctionLikeDeclaration | undefined;
+  if (typescript.isArrowFunction(init)) {
+    funcNode = normaliseArrowBody(factory, init);
+  } else {
+    funcNode = init;
+  }
+  const rewritten = tryRewriteFunction(
+    factory,
+    funcNode,
+    reparsedIndex.functions,
+    transformed,
+    warn,
+    checker,
+    [],
+    undefined,
+    allowIdentifiers,
+    keepContracts,
+    init,
+  );
+  if (rewritten === funcNode) {
+    return decl;
+  }
+  return factory.updateVariableDeclaration(
+    decl,
+    decl.name,
+    decl.exclamationToken,
+    decl.type,
+    rewritten as typescript.Expression,
+  );
+}
+
+function visitVariableStatement(
+  factory: typescript.NodeFactory,
+  node: typescript.VariableStatement,
+  reparsedIndex: ReparsedIndex,
+  transformed: { value: boolean },
+  warn: (msg: string) => void,
+  checker: typescript.TypeChecker | undefined,
+  allowIdentifiers: string[],
+  keepContracts: KeepContracts,
+): typescript.VariableStatement {
+  const modifiers = typescript.canHaveModifiers(node)
+    ? typescript.getModifiers(node) ?? []
+    : [];
+  const isExported = modifiers.some(
+    (mod) => mod.kind === typescript.SyntaxKind.ExportKeyword,
+  );
+  if (!isExported) {
+    return node;
+  }
+  const newDeclarations = node.declarationList.declarations.map((decl) =>
+    rewriteVariableDeclaration(
+      factory, decl, reparsedIndex, transformed, warn, checker, allowIdentifiers,
+      keepContracts,
+    ),
+  );
+  const changed = newDeclarations.some(
+    (decl, idx) => decl !== node.declarationList.declarations[idx],
+  );
+  if (!changed) {
+    return node;
+  }
+  const newDeclList = factory.updateVariableDeclarationList(
+    node.declarationList,
+    newDeclarations,
+  );
+  return factory.updateVariableStatement(node, modifiers, newDeclList);
+}
+
 // ---------------------------------------------------------------------------
 // Node visitor
 // ---------------------------------------------------------------------------
@@ -146,41 +250,50 @@ function visitNode(
 
   emitMisuseWarnings(node, warn);
 
-  if (
-    typescript.isFunctionDeclaration(node) &&
-    isPublicTarget(node as typescript.FunctionLikeDeclaration)
-  ) {
-    const rewritten = tryRewriteFunction(
-      factory,
-      node as typescript.FunctionLikeDeclaration,
-      reparsedIndex.functions,
-      transformed,
-      warn,
-      checker,
-      [],
-      undefined,
-      allowIdentifiers,
-      keepContracts,
-    );
-    return typescript.visitEachChild(
-      rewritten,
-      (child) => visitNode(
-        factory, child, context, reparsedIndex, transformed, warn,
-        checker, reparsedCache, paramMismatch, allowIdentifiers, keepContracts,
-      ),
-      context,
-    );
-  }
-
-  if (
-    typescript.isFunctionDeclaration(node) &&
-    !isPublicTarget(node as typescript.FunctionLikeDeclaration)
-  ) {
+  if (typescript.isFunctionDeclaration(node)) {
+    if (isPublicTarget(node)) {
+      const rewritten = tryRewriteFunction(
+        factory,
+        node,
+        reparsedIndex.functions,
+        transformed,
+        warn,
+        checker,
+        [],
+        undefined,
+        allowIdentifiers,
+        keepContracts,
+      );
+      return typescript.visitEachChild(
+        rewritten,
+        (child) => visitNode(
+          factory, child, context, reparsedIndex, transformed, warn,
+          checker, reparsedCache, paramMismatch, allowIdentifiers, keepContracts,
+        ),
+        context,
+      );
+    }
     emitUnsupportedClosureWarning(node, warn);
   }
 
-  if (typescript.isArrowFunction(node) || typescript.isFunctionExpression(node)) {
+  if (
+    (typescript.isArrowFunction(node) || typescript.isFunctionExpression(node)) &&
+    node.parent?.kind !== typescript.SyntaxKind.VariableDeclaration
+  ) {
     emitUnsupportedExpressionWarning(node, warn);
+  }
+
+  if (typescript.isVariableStatement(node) && isExportedStatement(node)) {
+    return visitVariableStatement(
+      factory,
+      node,
+      reparsedIndex,
+      transformed,
+      warn,
+      checker,
+      allowIdentifiers,
+      keepContracts,
+    );
   }
 
   return typescript.visitEachChild(

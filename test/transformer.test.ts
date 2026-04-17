@@ -49,6 +49,18 @@ describe('keepContracts option', () => {
   });
 });
 
+describe('location string for arrow function', () => {
+  it('uses the variable name in the ContractError message', () => {
+    const source = `
+      export const validate = /** @pre x > 0 */ (x: number): boolean => x > 0;
+    `;
+    const compiled = transform(source);
+    expect(compiled).toContain('ContractViolationError');
+    expect(compiled).toContain('"validate"');
+    expect(compiled).not.toContain('"anonymous"');
+  });
+});
+
 describe('keepContracts with class invariants', () => {
   it('keepContracts: "invariant" — invariant call emitted, pre absent', () => {
     const source = `
@@ -210,5 +222,151 @@ export function inc(x: number): number { return x + 1; }
     // Unknown qualifier → undefined → fall back to global 'post' → pre absent.
     const result = transform(source, { keepContracts: 'post' });
     expect(result).not.toContain('ContractViolationError("PRE"');
+  });
+});
+
+describe('buildLocationName for arrow and function expressions', () => {
+  it('returns variable name for arrow function assigned to exported const', () => {
+    const source = `
+      export const validate = /** @pre x > 0 */ (x: number): boolean => x > 0;
+    `;
+    // Full injection is wired in Task 4. Here we just confirm no throw on valid input
+    // and that the helpers compile correctly.
+    expect(() => transform(source)).not.toThrow();
+  });
+});
+
+describe('arrow function with expression body (@pre)', () => {
+  it('injects @pre guard into expression-body arrow', () => {
+    const source = `
+      export const double = /** @pre x > 0 */ (x: number): number => x * 2;
+    `;
+    const compiled = transform(source);
+    expect(compiled).toContain('ContractViolationError');
+    expect(compiled).toContain('x > 0');
+  });
+});
+
+describe('arrow function with block body (@pre)', () => {
+  it('injects @pre guard into block-body arrow', () => {
+    const source = `
+      export const clamp = /** @pre min <= max */
+        (num: number, min: number, max: number): number => {
+          return Math.min(Math.max(num, min), max);
+        };
+    `;
+    const compiled = transform(source);
+    expect(compiled).toContain('ContractViolationError');
+    expect(compiled).toContain('min <= max');
+  });
+});
+
+describe('function expression (@pre)', () => {
+  it('injects @pre guard into exported function expression', () => {
+    const source = `
+      export const trim = /** @pre input.length > 0 */ function(input: string): string {
+        return input.trim();
+      };
+    `;
+    const compiled = transform(source);
+    expect(compiled).toContain('ContractViolationError');
+    expect(compiled).toContain('input.length > 0');
+  });
+});
+
+describe('arrow function @post with result', () => {
+  it('injects @post result check (expression body)', () => {
+    const source = `
+      export const abs = /** @post result >= 0 */ (x: number): number => Math.abs(x);
+    `;
+    const compiled = transform(source);
+    expect(compiled).toContain('ContractViolationError');
+    expect(compiled).toContain('result >= 0');
+  });
+
+  it('warns and drops @post result when no return type annotation', () => {
+    const source = `
+      export const broken = /** @post result > 0 */ (x: number) => x;
+    `;
+    const warnings: string[] = [];
+    transform(source, (msg) => warnings.push(msg));
+    expect(
+      warnings.some((w) => w.includes('result') && w.includes('@post dropped')),
+    ).toBe(true);
+  });
+});
+
+describe('named function expression', () => {
+  it('injects @pre and uses variable name (not function name) in location', () => {
+    const source = `
+      export const factorial =
+        /** @pre num >= 0 */ function fact(num: number): number {
+          return num <= 1 ? 1 : num * fact(num - 1);
+        };
+    `;
+    const compiled = transform(source);
+    expect(compiled).toContain('ContractViolationError');
+    expect(compiled).toContain('num >= 0');
+    expect(compiled).toContain('"factorial"');
+    expect(compiled).not.toContain('"fact"');
+  });
+});
+
+describe('non-exported arrow function — no injection', () => {
+  it('leaves non-exported arrow unchanged and emits no warning', () => {
+    const source = `
+      const internal = /** @pre x > 0 */ (x: number): number => x;
+    `;
+    const warnings: string[] = [];
+    const compiled = transform(source, (msg) => warnings.push(msg));
+    expect(warnings).toHaveLength(0);
+    expect(compiled).not.toContain('require(');
+  });
+});
+
+describe('arrow with no tags — no injection', () => {
+  it('does not inject require when no @pre/@post present', () => {
+    const source = `
+      export const noop = (x: number): number => x;
+    `;
+    const compiled = transform(source);
+    expect(compiled).not.toContain('require(');
+  });
+});
+
+describe('multiple contracts on one arrow', () => {
+  it('injects both @pre and @post', () => {
+    const source = `
+      export const divide =
+        /** @pre denominator !== 0 @post result !== Infinity */
+        (numerator: number, denominator: number): number => numerator / denominator;
+    `;
+    const compiled = transform(source);
+    expect(compiled).toContain('denominator !== 0');
+    expect(compiled).toContain('result !== Infinity');
+  });
+});
+
+describe('unknown identifier in @pre on arrow — warning, tag dropped', () => {
+  it('warns and drops the @pre tag', () => {
+    const source = `
+      export const foo = /** @pre ghost > 0 */ (x: number): number => x;
+    `;
+    const warnings: string[] = [];
+    transform(source, (msg) => warnings.push(msg));
+    expect(warnings.some((w) => w.includes('ghost'))).toBe(true);
+  });
+});
+
+describe('VariableStatement with multiple declarations', () => {
+  it('only rewrites the annotated declaration', () => {
+    const source = `
+      export const alpha = 1,
+        validate = /** @pre x > 0 */ (x: number): boolean => x > 0;
+    `;
+    const compiled = transform(source);
+    expect(compiled).toContain('alpha');
+    expect(compiled).toContain('ContractViolationError');
+    expect(compiled).toContain('x > 0');
   });
 });

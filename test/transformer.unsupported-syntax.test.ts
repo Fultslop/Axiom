@@ -230,26 +230,22 @@ describe('transformer — unsupported syntax and misuse warnings', () => {
   });
 
   describe('@pre/@post on arrow function or function expression', () => {
-    it('warns when named arrow function has @pre tag', () => {
+    it('does not warn for non-exported arrow function with @pre tag in variable declaration', () => {
       const source = `
         const foo = /** @pre x > 0 */ (x: number): number => x + 1;
       `;
       const warnings: string[] = [];
       transpileWithWarn(source, (msg) => warnings.push(msg));
-      expect(
-        warnings.some((w) => w.includes('arrow functions') && w.includes('foo')),
-      ).toBe(true);
+      expect(warnings).toHaveLength(0);
     });
 
-    it('warns when named function expression has @post tag', () => {
+    it('does not warn for non-exported function expression with @post tag in variable declaration', () => {
       const source = `
         const bar = /** @post result > 0 */ function(x: number): number { return x; };
       `;
       const warnings: string[] = [];
       transpileWithWarn(source, (msg) => warnings.push(msg));
-      expect(
-        warnings.some((w) => w.includes('function expressions') && w.includes('bar')),
-      ).toBe(true);
+      expect(warnings).toHaveLength(0);
     });
 
     it('warns with (anonymous) for anonymous IIFE', () => {
