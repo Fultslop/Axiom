@@ -20,6 +20,33 @@ export function isPublicTarget(node: typescript.FunctionLikeDeclaration): boolea
   return isExportedFunction || isPublicMethod;
 }
 
+export function isExportedVariableInitialiser(
+  node: typescript.FunctionLikeDeclaration,
+): boolean {
+  if (
+    !typescript.isArrowFunction(node) &&
+    !typescript.isFunctionExpression(node)
+  ) {
+    return false;
+  }
+  const varDecl = node.parent;
+  if (varDecl === undefined || !typescript.isVariableDeclaration(varDecl)) {
+    return false;
+  }
+  const varDeclList = varDecl.parent;
+  if (!typescript.isVariableDeclarationList(varDeclList)) {
+    return false;
+  }
+  const varStmt = varDeclList.parent;
+  if (!typescript.isVariableStatement(varStmt)) {
+    return false;
+  }
+  const modifiers = typescript.canHaveModifiers(varStmt)
+    ? typescript.getModifiers(varStmt) ?? []
+    : [];
+  return modifiers.some((mod) => mod.kind === typescript.SyntaxKind.ExportKeyword);
+}
+
 function buildMethodLocationName(node: typescript.MethodDeclaration): string {
   const className =
     typescript.isClassDeclaration(node.parent) && node.parent.name
@@ -30,15 +57,11 @@ function buildMethodLocationName(node: typescript.MethodDeclaration): string {
   return `${className}.${methodName}`;
 }
 
-export function buildLocationName(node: typescript.FunctionLikeDeclaration): string {
-  if (typescript.isMethodDeclaration(node)) {
-    return buildMethodLocationName(node);
-  }
-  if (typescript.isFunctionDeclaration(node) && node.name) {
-    return node.name.text;
-  }
+function buildArrowExpressionName(
+  node: typescript.ArrowFunction | typescript.FunctionExpression,
+): string {
   if (
-    (typescript.isArrowFunction(node) || typescript.isFunctionExpression(node)) &&
+    node.parent !== undefined &&
     typescript.isVariableDeclaration(node.parent) &&
     typescript.isIdentifier(node.parent.name)
   ) {
@@ -46,6 +69,19 @@ export function buildLocationName(node: typescript.FunctionLikeDeclaration): str
   }
   if (typescript.isFunctionExpression(node) && node.name !== undefined) {
     return node.name.text;
+  }
+  return 'anonymous';
+}
+
+export function buildLocationName(node: typescript.FunctionLikeDeclaration): string {
+  if (typescript.isMethodDeclaration(node)) {
+    return buildMethodLocationName(node);
+  }
+  if (typescript.isFunctionDeclaration(node) && node.name) {
+    return node.name.text;
+  }
+  if (typescript.isArrowFunction(node) || typescript.isFunctionExpression(node)) {
+    return buildArrowExpressionName(node);
   }
   return 'anonymous';
 }

@@ -369,9 +369,7 @@ export function normaliseArrowBody(
   if (typescript.isBlock(node.body)) {
     return node;
   }
-  const returnStmt = factory.createReturnStatement(
-    node.body as typescript.Expression,
-  );
+  const returnStmt = factory.createReturnStatement(node.body);
   const block = factory.createBlock([returnStmt], /* multiLine */ true);
   return factory.updateArrowFunction(
     node,
