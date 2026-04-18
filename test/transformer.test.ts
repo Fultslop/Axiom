@@ -764,4 +764,77 @@ describe('nested function contract injection', () => {
     const output = transform(source);
     expect(output).toContain('require("@fultslop/axiom")');
   });
+
+});
+
+describe('nested function — @post result without return type annotation', () => {
+  it('emits warning and drops @post when nested function lacks return type', () => {
+    const source = `
+      export function outer(): void {
+        /** @post result.length > 0 */
+        function inner(s: string) { return s.trim(); }
+        inner('  ');
+      }
+    `;
+    const warnings: string[] = [];
+    transform(source, { warn: (msg) => warnings.push(msg) });
+    expect(
+      warnings.some(
+        (w) => w.includes("'result' used but no return type") && w.includes('outer > inner'),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe('nested closure — @prev behaviour', () => {
+  it('injects @post with explicit @prev capturing outer state', () => {
+    const source = `
+      export function outer(state: { count: number }): () => number {
+        /**
+         * @prev { count: state.count }
+         * @post result >= prev.count
+         */
+        return (): number => ++state.count;
+      }
+    `;
+    const warnings: string[] = [];
+    const output = transform(source, { warn: (msg) => warnings.push(msg) });
+    expect(warnings).toHaveLength(0);
+    expect(output).toContain('prev.count');
+  });
+
+  it('emits warning and drops @post when @prev is absent but prev is used', () => {
+    const source = `
+      export function outer(state: { count: number }): () => number {
+        /** @post result >= prev.count */
+        return (): number => ++state.count;
+      }
+    `;
+    const warnings: string[] = [];
+    transform(source, { warn: (msg) => warnings.push(msg) });
+    expect(
+      warnings.some(
+        (w) =>
+          w.includes("'prev' used but no @prev capture available") &&
+          w.includes('outer > (anonymous)'),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe('nested function inside class method', () => {
+  it('injects @pre with location ClassName.methodName > innerName', () => {
+    const source = `
+      class Processor {
+        public process(items: string[]): string[] {
+          /** @pre item.length > 0 */
+          function sanitise(item: string): string { return item.trim(); }
+          return items.map(sanitise);
+        }
+      }
+    `;
+    const output = transform(source);
+    expect(output).toContain('Processor.process > sanitise');
+    expect(output).toContain('item.length > 0');
+  });
 });

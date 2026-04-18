@@ -1,5 +1,7 @@
 # Closures — Task 6: Verify nested function inside a class method
 
+Status: Complete
+
 > **Sequence:** This is step 6 of 9. Requires Task 3 to be complete.
 > **For agentic workers:** Use `superpowers:executing-plans` to implement this task.
 

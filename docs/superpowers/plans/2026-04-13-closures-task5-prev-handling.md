@@ -1,5 +1,8 @@
 # Closures — Task 5: Verify `@prev` behaviour for nested closures
 
+Status: Complete
+
+
 > **Sequence:** This is step 5 of 9. Requires Task 3 to be complete.
 > **For agentic workers:** Use `superpowers:executing-plans` to implement this task.
 

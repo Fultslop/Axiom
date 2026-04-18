@@ -1,5 +1,7 @@
 # Closures — Task 4: Verify `@post result` warning for nested function without return type
 
+Status: Complete
+
 > **Sequence:** This is step 4 of 9. Requires Task 3 to be complete.
 > **For agentic workers:** Use `superpowers:executing-plans` to implement this task.
 
