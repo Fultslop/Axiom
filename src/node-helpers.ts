@@ -1,5 +1,18 @@
 import typescript from 'typescript';
 
+export function nodeSourceLocation(node: typescript.Node): string {
+  try {
+    const sourceFile = node.getSourceFile();
+    if (sourceFile === undefined) {
+      return '';
+    }
+    const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart());
+    return `${sourceFile.fileName}:${line + 1}:${character + 1}`;
+  } catch {
+    return '';
+  }
+}
+
 export function isPublicTarget(node: typescript.FunctionLikeDeclaration): boolean {
   const modifiers = typescript.canHaveModifiers(node)
     ? typescript.getModifiers(node) ?? []

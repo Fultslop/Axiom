@@ -13,7 +13,7 @@ import {
   extractContractTagsFromNode,
   extractInvariantExpressions,
 } from './jsdoc-parser';
-import { isExportedVariableInitialiser } from './node-helpers';
+import { isExportedVariableInitialiser, nodeSourceLocation } from './node-helpers';
 import { isNestedSupportedForm, isIIFEPattern, isIIFESupportedForm } from './tag-pipeline';
 
 const MODE_IGNORE = 'ignore' as const;
@@ -90,18 +90,26 @@ function emitMisuseWarnings(node: typescript.Node, warn: (msg: string) => void):
     const invariantExprs = extractInvariantExpressions(node);
     if (invariantExprs.length > 0) {
       const nodeName = extractNodeName(node);
+      const loc = nodeSourceLocation(node);
+      const suffix = loc !== '' ? ` (${loc})` : '';
       warn(
         '[axiom] Warning: @invariant is only supported on class declarations'
-        + ` — tag has no effect (in ${nodeName})`,
+        + ` — tag has no effect (in ${nodeName}${suffix})`,
       );
     }
   }
 }
 
-function emitUnsupportedFunctionWarning(name: string, warn: (msg: string) => void): void {
+function emitUnsupportedFunctionWarning(
+  node: typescript.Node,
+  name: string,
+  warn: (msg: string) => void,
+): void {
+  const loc = nodeSourceLocation(node);
+  const suffix = loc !== '' ? ` (${loc})` : '';
   warn(
     '[axiom] Warning: @pre/@post on arrow functions, function expressions, and closures'
-    + ` is not supported — contracts were not injected (in ${name})`,
+    + ` is not supported — contracts were not injected (in ${name}${suffix})`,
   );
 }
 
@@ -290,7 +298,7 @@ function visitNode(
       );
     }
     if (extractContractTagsFromNode(node).length > 0 && !isNestedSupportedForm(node)) {
-      emitUnsupportedFunctionWarning(node.name?.text ?? '(anonymous)', warn);
+      emitUnsupportedFunctionWarning(node, node.name?.text ?? '(anonymous)', warn);
     }
     return typescript.visitEachChild(
       node,
@@ -304,7 +312,7 @@ function visitNode(
     node.parent?.kind !== typescript.SyntaxKind.VariableDeclaration
   ) {
     if (extractContractTagsFromNode(node).length > 0 && !isNestedSupportedForm(node)) {
-      emitUnsupportedFunctionWarning(resolveDisplayName(node), warn);
+      emitUnsupportedFunctionWarning(node, resolveDisplayName(node), warn);
     }
   }
 
@@ -314,7 +322,7 @@ function visitNode(
   // Skip synthetic nodes (pos === -1): the @post result-capture IIFE is a
   // synthetic CallExpression created by ast-builder and must not trigger this warning.
   if (node.pos !== -1 && isIIFEPattern(node) && !isIIFESupportedForm(node)) {
-    emitUnsupportedFunctionWarning('(anonymous IIFE)', warn);
+    emitUnsupportedFunctionWarning(node, '(anonymous IIFE)', warn);
   }
 
   if (typescript.isVariableStatement(node) && isExportedStatement(node)) {

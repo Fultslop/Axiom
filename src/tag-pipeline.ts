@@ -334,7 +334,8 @@ export function isNestedSupportedForm(node: typescript.Node): boolean {
  * Returns true if node is an IIFE -- an arrow/function expression used as the
  * callee of a CallExpression that is not assigned to a variable.
  *
- * Example: /* @pre x > 0 * / ((x) => { })(-1)
+ * Example: a block-comment pre-condition annotation above an IIFE call:
+ *   `((x) => { })(-1)` where the contract comment precedes the call expression.
  * The JSDoc comment sits above the call expression, not on the arrow itself,
  * so getJSDocTags(CallExpression) returns nothing. This function provides a
  * structural shortcut so that the #13 warning can fire for IIFEs correctly.

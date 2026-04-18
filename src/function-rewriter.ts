@@ -5,7 +5,7 @@ import {
 } from './ast-builder';
 import {
   buildLocationName, buildKnownIdentifiers, isPublicTarget,
-  buildNestedLocationName, buildCapturedIdentifiers,
+  buildNestedLocationName, buildCapturedIdentifiers, nodeSourceLocation,
 } from './node-helpers';
 import { buildParameterTypes, buildPostParamTypes } from './type-helpers';
 import { type ContractTag, extractContractTags } from './jsdoc-parser';
@@ -280,9 +280,9 @@ function rewriteNestedFunctionLike(
     return null;
   }
 
-  const location = buildNestedLocationName(
-    outerNode, innerNode, variableName,
-  );
+  const location = buildNestedLocationName(outerNode, innerNode, variableName);
+  const sourceLoc = nodeSourceLocation(innerNode);
+  const locatedWarn = sourceLoc === '' ? warn : (msg: string): void => warn(`${sourceLoc}: ${msg}`);
 
   const preKnown = buildKnownIdentifiers(innerNode, false);
   const postKnown = buildKnownIdentifiers(innerNode, true);
@@ -304,7 +304,7 @@ function rewriteNestedFunctionLike(
   const postParamTypes = buildPostParamTypes(innerNode, checker, paramTypes);
 
   const { preTags, postTags, prevCapture } = extractAndFilterTags(
-    innerNode, reparsedNode, undefined, location, warn,
+    innerNode, reparsedNode, undefined, location, locatedWarn,
     preKnown, postKnown, checker, paramTypes, postParamTypes,
   );
 
@@ -497,6 +497,8 @@ function rewriteFunction(
   const reparsedNode = reparsedFunctions.get(node.pos) ?? node;
 
   const location = buildLocationName(locationNode);
+  const sourceLoc = nodeSourceLocation(locationNode);
+  const locatedWarn = sourceLoc === '' ? warn : (msg: string): void => warn(`${sourceLoc}: ${msg}`);
   const preKnown = buildKnownIdentifiers(node, false);
   const postKnown = buildKnownIdentifiers(node, true);
   enrichKnownIdentifiers(preKnown, postKnown, checker, node, allowIdentifiers);
@@ -506,7 +508,7 @@ function rewriteFunction(
   const postParamTypes = buildPostParamTypes(node, checker, paramTypes);
 
   const { preTags, postTags, prevCapture } = extractAndFilterTags(
-    node, reparsedNode, interfaceMethodContracts, location, warn,
+    node, reparsedNode, interfaceMethodContracts, location, locatedWarn,
     preKnown, postKnown, checker, paramTypes, postParamTypes,
   );
 
