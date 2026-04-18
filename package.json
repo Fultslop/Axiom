@@ -1,6 +1,6 @@
 {
   "name": "@fultslop/axiom",
-  "version": "0.9.0-alpha.15",
+  "version": "0.9.0-alpha.16",
   "description": "Contract-driven development for TypeScript — @pre, @post, and @invariant JSDoc tags enforced at runtime in dev builds, stripped in release builds.",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
