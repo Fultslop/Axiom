@@ -269,6 +269,42 @@ try {
 }
 ```
 
+## Async functions
+
+`@pre` and `@post` work on `async` functions and async class methods. Pre-conditions run synchronously before the async body; post-conditions check the **resolved** value, not the `Promise` object. `result` in a `@post` expression refers to the awaited `T`, not `Promise<T>`.
+
+```typescript
+/**
+ * @pre id > 0
+ * @post result !== null
+ */
+export async function findUser(id: number): Promise<User | null> {
+  return db.query(id);
+}
+```
+
+A `@post` on an `async` function with return type `Promise<void>` behaves like `void` — it is dropped with a warning because there is no meaningful `result` to check.
+
+Generators (`function*`) and async generators (`async function*`) are not yet supported.
+
+## Arrow functions and function expressions
+
+`@pre` and `@post` work on exported `const` arrow functions and function expressions. The JSDoc comment must precede the `const` keyword:
+
+```typescript
+/** @pre x > 0 @post result >= 0 */
+export const double = (x: number): number => x * 2;
+
+/** @pre input.length > 0 */
+export const trim = function(input: string): string {
+  return input.trim();
+};
+```
+
+Expression-body arrows are normalised to block bodies automatically — `result` capture works identically to named function declarations. The location string in error messages uses the variable name (`"double"`, `"trim"`).
+
+Non-exported `const` arrows and class field arrows are not instrumented (no warning is emitted for the non-exported case).
+
 ## Manual assertions
 
 For cases the transformer cannot reach (enum references, complex expressions), `pre` and `post` are plain assertion functions you can call directly inside a function body:

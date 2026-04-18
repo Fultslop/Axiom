@@ -201,13 +201,15 @@ This lets a monorepo or multi-module library opt individual files in without cha
 - Unary operand type mismatch — identifiers inside unary prefix expressions (`-x`, `+x`, `!x`) are type-checked against the literal operand of the comparison (e.g. `-amount > 0` warns when `amount` is `string`)
 - Zero contract overhead in release builds — plain `tsc` ignores JSDoc entirely
 - `keepContracts` option — opt-in baking of contracts into release builds for library authors; supports granular selection by kind (`'pre'`, `'post'`, `'invariant'`, `'all'`) and a file-level `// @axiom keepContracts` directive
-- Misuse detection — `@pre`/`@post` on constructors, arrow functions, function expressions, non-exported or nested function declarations, and class declarations all emit targeted `[axiom] Warning:` diagnostics; `@invariant` on non-class nodes is similarly reported
+- `@pre` and `@post` on `async` functions and async class methods — post-conditions check the **resolved** value (`T`), not the `Promise<T>` object; `result` refers to the awaited value; `@post` on `async` functions returning `Promise<void>` is dropped with a warning (no meaningful `result`)
+- `@pre` and `@post` on exported `const` arrow functions and function expressions — expression-body arrows are normalised to block bodies automatically; the location string uses the variable name; JSDoc must precede the `const` keyword
+- Misuse detection — `@pre`/`@post` on constructors, non-exported or nested arrow/function-expression initialisers, non-exported or nested function declarations, and class declarations all emit targeted `[axiom] Warning:` diagnostics; `@invariant` on non-class nodes is similarly reported
 
 ---
 
 ## Not yet in scope
 
-- `async` functions and generators
+- Generators (`function*`) and async generators (`async function*`) — `yield` semantics make a single `result` post-condition ambiguous; deferred to a future spec
 - Inherited contracts from base classes (interface contracts are supported; class-to-class inheritance is not)
 - Integration with `ts-patch` via the `type: raw` loader under TypeScript 6 + `moduleResolution: node16` (a known ts-node 10.x incompatibility; tests use `ts.transpileModule` directly as the canonical verification path)
 
@@ -236,7 +238,7 @@ export function foo(val: number | string): void { … }
 export function activate(status: Status): void { … }
 ```
 
-**3. `result` used without a return type annotation** — if a `@post` expression references `result` but the function has no declared return type (or is declared `void`/`never`), the `@post` is dropped with a warning. This applies in all compilation modes — no TypeChecker is required.
+**3. `result` used without a return type annotation** — if a `@post` expression references `result` but the function has no declared return type (or is declared `void`/`never`), the `@post` is dropped with a warning. This applies in all compilation modes — no TypeChecker is required. For `async` functions, `Promise<void>` is treated as `void` by the same rule.
 ```typescript
 /** @post result === "foo" */
 // warns: 'result' used but no return type is declared; @post dropped
@@ -245,16 +247,29 @@ export function noAnnotation(x: number) { return x; }
 /** @post result === "foo" */
 // warns: 'result' used but return type is 'void'; @post dropped
 export function voidFn(x: number): void { }
+
+/** @post result !== null */
+// warns: 'result' used but return type is 'void'; @post dropped
+export async function asyncVoid(x: number): Promise<void> { }
 ```
 
-**4. Multi-level property chains** — only the root object of a property access chain is scope-checked. Intermediate and leaf members are not validated.
+**4. Narrowing in `&&` chains is limited to `typeof` guards** — `typeof x === 'string'` guards in `&&` chains are recognised and applied to subsequent clauses, enabling type-mismatch detection for ambiguous union parameters. Other narrowing patterns — null checks, truthiness, `instanceof`, `||` chains — are not recognised.
 ```typescript
-/** @pre this.config.limit > 0 */         // 'this' is scope-checked; 'config' and 'limit' are not
-public run(input: number): void { … }
+// Works — typeof guard applied:
+/** @pre typeof x === "string" && x === 42 */  // warns: x narrowed to string, 42 is number literal
+export function foo(x: string | number): void { … }
+
+// Not recognised — || chains never apply narrowing:
+/** @pre typeof x === "string" || x === 42 */  // no warning (x is ambiguous union; guard ignored)
+export function foo(x: string | number): void { … }
 ```
 
-**5. Compound conditions and type narrowing** — type mismatch detection examines each binary sub-expression in isolation. Type narrowing established by a sibling clause is not taken into account.
+**5. Async arrow functions are not instrumented** — `async` and arrow function support do not compose. An `async` arrow function assigned to an exported `const` is silently skipped — no injection, no warning. Use an `async function` declaration instead.
 ```typescript
-/** @pre amount !== null && amount === "zero" */  // no type-mismatch warning on the second clause
-export function pay(amount: number | null): void { … }
+// NOT supported — contracts silently skipped
+export const fetch = /** @pre id > 0 */ async (id: number): Promise<User> => db.query(id);
+
+// Supported — use a function declaration
+/** @pre id > 0 */
+export async function fetch(id: number): Promise<User> { return db.query(id); }
 ```

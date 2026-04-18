@@ -1,4 +1,4 @@
-import { transform, transpileWithWarn } from './helpers';
+import { transform, transpileWithWarn, transformWithProgram } from './helpers';
 
 describe('transformer — warnings', () => {
   it('skips @pre tag with assignment operator and emits a warning', () => {
@@ -143,5 +143,38 @@ describe('transformer — warnings', () => {
     `;
     transpileWithWarn(source, warn);
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('A8 — strips JSDoc comment when @pre on arrow function is dropped due to unknown identifier', () => {
+    const warns: string[] = [];
+    const source = `
+      /** @pre unknownVar > 0 */
+      export const arrowWithUnknownId = (x: number): number => x;
+    `;
+    const output = transformWithProgram(source, (msg) => warns.push(msg));
+    expect(warns.length).toBeGreaterThan(0);
+    expect(output).not.toContain('unknownVar');
+  });
+
+  it('A10 — strips JSDoc comment when @post on void-return arrow function is dropped', () => {
+    const warns: string[] = [];
+    const source = `
+      /** @post result === undefined */
+      export const arrowVoidWithPost = (msg: string): void => { console.log(msg); };
+    `;
+    const output = transformWithProgram(source, (msg) => warns.push(msg));
+    expect(warns.length).toBeGreaterThan(0);
+    expect(output).not.toContain('result === undefined');
+  });
+
+  it('B3 — strips JSDoc comment when @post on Promise<void> async function is dropped', () => {
+    const warns: string[] = [];
+    const source = `
+      /** @post result === undefined */
+      export async function asyncVoidWithPost(msg: string): Promise<void> { console.log(msg); }
+    `;
+    const output = transformWithProgram(source, (msg) => warns.push(msg));
+    expect(warns.length).toBeGreaterThan(0);
+    expect(output).not.toContain('result === undefined');
   });
 });

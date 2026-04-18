@@ -133,14 +133,19 @@ export function buildPostCheck(
 export function buildBodyCapture(
   originalStatements: typescript.NodeArray<typescript.Statement>,
   factory: typescript.NodeFactory = typescript.factory,
+  isAsync: boolean = false,
 ): typescript.VariableStatement {
   const reifiedStatements = Array.from(originalStatements).map(
     (stmt) => reifyStatement(factory, stmt),
   );
 
+  const asyncModifiers = isAsync
+    ? [factory.createModifier(typescript.SyntaxKind.AsyncKeyword)]
+    : undefined;
+
   const iife = factory.createCallExpression(
     factory.createArrowFunction(
-      undefined,
+      asyncModifiers,
       undefined,
       [],
       undefined,
@@ -151,6 +156,10 @@ export function buildBodyCapture(
     [],
   );
 
+  const initialiser: typescript.Expression = isAsync
+    ? factory.createAwaitExpression(iife)
+    : iife;
+
   return factory.createVariableStatement(
     undefined,
     factory.createVariableDeclarationList(
@@ -158,7 +167,7 @@ export function buildBodyCapture(
         factory.createIdentifier(AXIOM_RESULT_VAR),
         undefined,
         undefined,
-        iife,
+        initialiser,
       )],
       typescript.NodeFlags.Const,
     ),

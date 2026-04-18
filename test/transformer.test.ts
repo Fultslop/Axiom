@@ -1,4 +1,4 @@
-import { transform, transformES2022 } from './helpers';
+import { transform, transformES2022, transformWithProgram, evalTransformedWith } from './helpers';
 
 describe('keepContracts option', () => {
   const sourcePreAndPost = `
@@ -368,5 +368,222 @@ describe('VariableStatement with multiple declarations', () => {
     expect(compiled).toContain('alpha');
     expect(compiled).toContain('ContractViolationError');
     expect(compiled).toContain('x > 0');
+  });
+});
+
+describe('async function post-condition body capture', () => {
+  it('checks resolved value for @post result !== null on async function', async () => {
+    const source = `
+      interface User { id: number }
+      /**
+       * @post result !== null
+       */
+      export async function findUser(id: number): Promise<User | null> {
+        return Promise.resolve(null);
+      }
+    `;
+    const warnings: string[] = [];
+    const js = transformWithProgram(source, (msg) => warnings.push(msg));
+    // The transformed function must be async and await the IIFE
+    expect(js).toContain('await');
+    expect(js).toContain('async ()');
+    // Invoking it should throw because null !== null is false (i.e. result IS null)
+    const fn = evalTransformedWith(js, 'findUser') as (id: number) => Promise<unknown>;
+    await expect(fn(1)).rejects.toThrow();
+  });
+
+  it('does not wrap synchronous function body in await', () => {
+    const source = `
+      /**
+       * @post result > 0
+       */
+      export function count(): number { return 1; }
+    `;
+    const warnings: string[] = [];
+    const js = transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(js).not.toContain('await (async');
+  });
+
+  it('@pre fires synchronously before async body', async () => {
+    const source = `
+      /**
+       * @pre id > 0
+       */
+      export async function findUser(id: number): Promise<void> {
+        return Promise.resolve();
+      }
+    `;
+    const warnings: string[] = [];
+    const js = transformWithProgram(source, (msg) => warnings.push(msg));
+    const fn = evalTransformedWith(js, 'findUser') as (id: number) => Promise<void>;
+    await expect(fn(0)).rejects.toThrow();
+    await expect(fn(1)).resolves.toBeUndefined();
+  });
+});
+
+describe('async void return type — @post result drop', () => {
+  it('warns and drops @post result on async Promise<void> function', () => {
+    const source = `
+      /**
+       * @post result !== undefined
+       */
+      export async function doWork(): Promise<void> {}
+    `;
+    const warnings: string[] = [];
+    transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(
+      warnings.some((w) => w.includes("return type is 'void'") && w.includes('@post')),
+    ).toBe(true);
+  });
+
+  it('warns and drops @post result on async Promise<never> function', () => {
+    const source = `
+      /**
+       * @post result !== null
+       */
+      export async function fail(): Promise<never> { throw new Error(); }
+    `;
+    const warnings: string[] = [];
+    transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(
+      warnings.some((w) => w.includes("return type is 'never'") && w.includes('@post')),
+    ).toBe(true);
+  });
+
+  it('keeps @post result on async Promise<number>', () => {
+    const source = `
+      /**
+       * @post result > 0
+       */
+      export async function count(): Promise<number> { return Promise.resolve(1); }
+    `;
+    const warnings: string[] = [];
+    transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(
+      warnings.some((w) =>
+        w.includes("return type is 'void'") || w.includes("return type is 'never'")),
+    ).toBe(false);
+  });
+
+  it('B8 — injects @post guard on async function whose body contains an early throw', () => {
+    const source = `
+      /**
+       * @post result > 0
+       */
+      export async function asyncWithThrow(x: number): Promise<number> {
+        if (x < 0) throw new Error('fail');
+        return x;
+      }
+    `;
+    const output = transform(source);
+    expect(output).toContain('throw new Error');
+    expect(output).toContain('ContractViolationError("POST"');
+  });
+});
+
+describe('async result type mismatch detection', () => {
+  it('warns for @post result === "ok" when async return is Promise<number>', () => {
+    const source = `
+      /**
+       * @post result === "ok"
+       */
+      export async function getCount(): Promise<number> { return Promise.resolve(1); }
+    `;
+    const warnings: string[] = [];
+    transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(
+      warnings.some((w) => w.includes('type mismatch') && w.includes('result')),
+    ).toBe(true);
+  });
+
+  it('does not warn for @post result > 0 when async return is Promise<number>', () => {
+    const source = `
+      /**
+       * @post result > 0
+       */
+      export async function getCount(): Promise<number> { return Promise.resolve(1); }
+    `;
+    const warnings: string[] = [];
+    transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(warnings).toHaveLength(0);
+  });
+
+  it('does not warn for @post result !== null when async return is Promise<string>', () => {
+    const source = `
+      /**
+       * @post result !== null
+       */
+      export async function getName(): Promise<string> { return Promise.resolve(''); }
+    `;
+    const warnings: string[] = [];
+    transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(warnings).toHaveLength(0);
+  });
+});
+
+describe('async class method post-condition', () => {
+  it('checks resolved value for @post result !== null on async method', async () => {
+    const source = `
+      interface User { id: number }
+      export class Repo {
+        /**
+         * @post result !== null
+         */
+        async find(id: number): Promise<User | null> {
+          return Promise.resolve(null);
+        }
+      }
+    `;
+    const warnings: string[] = [];
+    const js = transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(js).toContain('await');
+    expect(js).toContain('async ()');
+    const RepoClass = evalTransformedWith(js, 'Repo') as new () => { find: (id: number) => Promise<unknown> };
+    const repo = new RepoClass();
+    await expect(repo.find(1)).rejects.toThrow();
+  });
+
+  it('invariant fires after await resolves, not on unresolved promise', async () => {
+    const source = `
+      /**
+       * @invariant this.count >= 0
+       */
+      export class Counter {
+        count = 0;
+        async increment(): Promise<void> {
+          this.count += 1;
+        }
+      }
+    `;
+    const warnings: string[] = [];
+    const js = transformWithProgram(source, (msg) => warnings.push(msg));
+    const CounterClass = evalTransformedWith(js, 'Counter') as new () => { increment: () => Promise<void> };
+    const counter = new CounterClass();
+    await expect(counter.increment()).resolves.toBeUndefined();
+  });
+});
+
+describe('@prev with async method', () => {
+  it('captures prev before await and compares against resolved result', async () => {
+    const source = `
+      export class Queue {
+        length = 0;
+        /**
+         * @post result > prev.length
+         */
+        async push(item: string): Promise<number> {
+          this.length += 1;
+          return Promise.resolve(this.length);
+        }
+      }
+    `;
+    const warnings: string[] = [];
+    const js = transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(warnings).toHaveLength(0);
+    const QueueClass = evalTransformedWith(
+      js, 'Queue',
+    ) as new () => { push: (item: string) => Promise<number> };
+    const queue = new QueueClass();
+    await expect(queue.push('a')).resolves.toBe(1);
   });
 });

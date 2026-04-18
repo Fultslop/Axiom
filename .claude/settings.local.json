@@ -15,7 +15,8 @@
       "Bash(grep -i \"optional\\\\|rest\\\\|nullish\\\\|ternary\\\\|ChainExpression\" /c/Users/lassc/Code/typescript/fsprepost/docs/superpowers/**/*.md)",
       "Bash(ls -la /c/Users/lassc/Code/typescript/fsprepost/*.md)",
       "Bash(npm install *)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(npm publish *)"
     ]
   }
 }

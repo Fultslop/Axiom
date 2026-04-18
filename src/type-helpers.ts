@@ -3,6 +3,7 @@ import typescript from 'typescript';
 export type SimpleType = 'number' | 'string' | 'boolean';
 
 const TYPE_NON_PRIMITIVE = 'non-primitive' as const;
+const SYMBOL_NAME_PROMISE = 'Promise' as const;
 export type TypeMapValue = SimpleType | typeof TYPE_NON_PRIMITIVE;
 
 function simpleTypeFromFlags(flags: number): SimpleType | undefined {
@@ -61,6 +62,26 @@ function resolveSimpleType(
   return undefined;
 }
 
+function unwrapPromiseType(
+  returnType: typescript.Type,
+  checker: typescript.TypeChecker,
+): typescript.Type | undefined {
+  /* eslint-disable no-bitwise */
+  if (!(returnType.flags & typescript.TypeFlags.Object)) {
+    return undefined;
+  }
+  /* eslint-enable no-bitwise */
+  const symbol = returnType.getSymbol();
+  if (symbol?.name !== SYMBOL_NAME_PROMISE) {
+    return undefined;
+  }
+  const typeArgs = checker.getTypeArguments(returnType as typescript.TypeReference);
+  if (typeArgs.length !== 1) {
+    return undefined;
+  }
+  return typeArgs[0];
+}
+
 export function buildParameterTypes(
   node: typescript.FunctionLikeDeclaration,
   checker: typescript.TypeChecker,
@@ -91,9 +112,10 @@ export function buildPostParamTypes(
   if (sig === undefined) {
     return base;
   }
-  const returnType = checker.getReturnTypeOfSignature(sig);
-  const resultType = simpleTypeFromFlags(returnType.flags) ??
-    resolveSimpleType(returnType, checker);
+  const rawReturn = checker.getReturnTypeOfSignature(sig);
+  const resolvedReturn = unwrapPromiseType(rawReturn, checker) ?? rawReturn;
+  const resultType = simpleTypeFromFlags(resolvedReturn.flags) ??
+    resolveSimpleType(resolvedReturn, checker);
   if (resultType === undefined) {
     return base;
   }

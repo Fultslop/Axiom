@@ -95,10 +95,39 @@ export function expressionUsesResult(expression: string): boolean {
   }
 }
 
+const PROMISE_TYPE = 'Promise' as const;
+
+function resolvePromiseTypeArg(
+  typeNode: typescript.TypeNode,
+): typescript.SyntaxKind | undefined {
+  if (!typescript.isTypeReferenceNode(typeNode)) {
+    return undefined;
+  }
+  const typeName = typescript.isIdentifier(typeNode.typeName)
+    ? typeNode.typeName.text
+    : undefined;
+  if (typeName !== PROMISE_TYPE) {
+    return undefined;
+  }
+  const args = typeNode.typeArguments;
+  if (args === undefined || args.length !== 1) {
+    return undefined;
+  }
+  const inner = args[0]!.kind;
+  if (
+    inner === typescript.SyntaxKind.VoidKeyword ||
+    inner === typescript.SyntaxKind.NeverKeyword ||
+    inner === typescript.SyntaxKind.UndefinedKeyword
+  ) {
+    return inner;
+  }
+  return undefined;
+}
+
 function returnTypeDescription(node: typescript.FunctionLikeDeclaration): string | undefined {
   const typeNode = node.type;
   if (typeNode === undefined) {
-    return undefined; // no annotation at all
+    return undefined;
   }
   if (
     typeNode.kind === typescript.SyntaxKind.VoidKeyword ||
@@ -106,6 +135,10 @@ function returnTypeDescription(node: typescript.FunctionLikeDeclaration): string
     typeNode.kind === typescript.SyntaxKind.UndefinedKeyword
   ) {
     return typescript.tokenToString(typeNode.kind) ?? 'void';
+  }
+  const innerKind = resolvePromiseTypeArg(typeNode);
+  if (innerKind !== undefined) {
+    return typescript.tokenToString(innerKind) ?? 'void';
   }
   return RETURN_TYPE_OK;
 }
@@ -332,6 +365,7 @@ function buildGuardedStatements(
   prevCapture: string | null,
   exportedNames: Set<string>,
   keepContracts: KeepContracts,
+  isAsync: boolean,
 ): typescript.Statement[] {
   const statements: typescript.Statement[] = [];
 
@@ -347,7 +381,7 @@ function buildGuardedStatements(
     if (prevCapture !== null) {
       statements.push(buildPrevCapture(prevCapture, factory));
     }
-    statements.push(buildBodyCapture(originalBody.statements, factory));
+    statements.push(buildBodyCapture(originalBody.statements, factory, isAsync));
     for (const tag of activePost) {
       statements.push(buildPostCheck(tag.expression, location, factory, exportedNames));
     }
@@ -443,6 +477,13 @@ function isStaticMethod(node: typescript.FunctionLikeDeclaration): boolean {
     ? typescript.getModifiers(node) ?? []
     : [];
   return modifiers.some((mod) => mod.kind === typescript.SyntaxKind.StaticKeyword);
+}
+
+function isAsyncFunction(node: typescript.FunctionLikeDeclaration): boolean {
+  const modifiers = typescript.canHaveModifiers(node)
+    ? typescript.getModifiers(node) ?? []
+    : [];
+  return modifiers.some((mod) => mod.kind === typescript.SyntaxKind.AsyncKeyword);
 }
 
 function buildInvariantCallIfNeeded(
@@ -579,9 +620,11 @@ function rewriteFunction(
     return null;
   }
 
+  const asyncFlag = isAsyncFunction(node);
+
   const newStatements = buildGuardedStatements(
     factory, preTags, postTags, originalBody, location, invariantCall,
-    prevCapture, exportedNames, keepContracts,
+    prevCapture, exportedNames, keepContracts, asyncFlag,
   );
   return applyNewBody(factory, node, factory.createBlock(newStatements, true));
 }
