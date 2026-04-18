@@ -14,6 +14,7 @@ import {
   extractInvariantExpressions,
 } from './jsdoc-parser';
 import { isExportedVariableInitialiser } from './node-helpers';
+import { isNestedSupportedForm, isIIFEPattern, isIIFESupportedForm } from './tag-pipeline';
 
 const MODE_IGNORE = 'ignore' as const;
 const DIRECTIVE_PREFIX = '// @axiom keepContracts' as const;
@@ -288,7 +289,7 @@ function visitNode(
         tsContext,
       );
     }
-    if (extractContractTagsFromNode(node).length > 0) {
+    if (extractContractTagsFromNode(node).length > 0 && !isNestedSupportedForm(node)) {
       emitUnsupportedFunctionWarning(node.name?.text ?? '(anonymous)', warn);
     }
     return typescript.visitEachChild(
@@ -302,9 +303,18 @@ function visitNode(
     (typescript.isArrowFunction(node) || typescript.isFunctionExpression(node)) &&
     node.parent?.kind !== typescript.SyntaxKind.VariableDeclaration
   ) {
-    if (extractContractTagsFromNode(node).length > 0) {
+    if (extractContractTagsFromNode(node).length > 0 && !isNestedSupportedForm(node)) {
       emitUnsupportedFunctionWarning(resolveDisplayName(node), warn);
     }
+  }
+
+  // IIFEs (e.g. `/** @pre */ ((x) => {})(1)`) -- getJSDocTags does not reliably
+  // attach to CallExpression nodes. Detect them structurally and emit the warning
+  // only when they are not supported nested forms (i.e. not returned arrows).
+  // Skip synthetic nodes (pos === -1): the @post result-capture IIFE is a
+  // synthetic CallExpression created by ast-builder and must not trigger this warning.
+  if (node.pos !== -1 && isIIFEPattern(node) && !isIIFESupportedForm(node)) {
+    emitUnsupportedFunctionWarning('(anonymous IIFE)', warn);
   }
 
   if (typescript.isVariableStatement(node) && isExportedStatement(node)) {

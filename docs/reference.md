@@ -178,6 +178,78 @@ This lets a monorepo or multi-module library opt individual files in without cha
 
 ---
 
+## Nested function contracts
+
+`@pre` and `@post` tags on a named inner function or a `const`-assigned arrow inside an exported function or public class method are injected automatically — no extra configuration required.
+
+### Supported forms
+
+**Named inner `FunctionDeclaration`** — place the JSDoc tag immediately before the inner function:
+
+```typescript
+export function processItems(items: string[]): string[] {
+  /** @pre item.length > 0 */
+  function sanitise(item: string): string { return item.trim(); }
+  return items.map(sanitise);
+}
+```
+
+**`const`-assigned arrow or function expression** — same placement rule:
+
+```typescript
+export function outer(values: number[]): number[] {
+  /** @pre x > 0 */
+  const double = (x: number): number => x * 2;
+  return values.map(double);
+}
+```
+
+Multiple tagged nested functions at the same depth are all rewritten:
+
+```typescript
+export function outer(): void {
+  /** @pre x > 0 */
+  function named(x: number): number { return x * 2; }
+  /** @pre y > 0 */
+  const arrow = (y: number): number => y * 3;
+  named(2);
+  arrow(3);
+}
+```
+
+### Location strings
+
+Injected contract errors use a `>` separator to show nesting depth. For nested functions inside a top-level exported function, the format is `outerName > innerName`. For nested functions inside a class method, it is `ClassName.methodName > innerName`:
+
+```
+[axiom] ContractViolationError: PRE — outer > sanitise: item.length > 0
+[axiom] ContractViolationError: PRE — Processor.process > sanitise: item.length > 0
+```
+
+### Depth limit — one level only
+
+Only functions nested **one level deep** inside a public target are rewritten. A grandchild function (a function nested inside an already-nested function) and any IIFE still emit the `#13` misuse warning and are not injected:
+
+```typescript
+export function outer(): void {
+  function middle(): void {
+    /** @pre x > 0 */
+    function inner(x: number): void { /* NOT injected — grandchild */ }
+    inner(1);
+  }
+  middle();
+}
+```
+
+```typescript
+export function outer(): void {
+  /** @pre x > 0 */
+  ((x: number) => { /* NOT injected — IIFE */ })(-1);
+}
+```
+
+---
+
 ## Supported cases
 
 - `@pre` tags on exported functions and public class methods
@@ -203,7 +275,8 @@ This lets a monorepo or multi-module library opt individual files in without cha
 - `keepContracts` option — opt-in baking of contracts into release builds for library authors; supports granular selection by kind (`'pre'`, `'post'`, `'invariant'`, `'all'`) and a file-level `// @axiom keepContracts` directive
 - `@pre` and `@post` on `async` functions and async class methods — post-conditions check the **resolved** value (`T`), not the `Promise<T>` object; `result` refers to the awaited value; `@post` on `async` functions returning `Promise<void>` is dropped with a warning (no meaningful `result`)
 - `@pre` and `@post` on exported `const` arrow functions and function expressions — expression-body arrows are normalised to block bodies automatically; the location string uses the variable name; JSDoc must precede the `const` keyword
-- Misuse detection — `@pre`/`@post` on constructors, non-exported or nested arrow/function-expression initialisers, non-exported or nested function declarations, and class declarations all emit targeted `[axiom] Warning:` diagnostics; `@invariant` on non-class nodes is similarly reported
+- `@pre` and `@post` on named inner `FunctionDeclaration` and `const`-assigned arrow/function expressions nested one level deep inside an exported function or public class method — location string uses `outerName > innerName` or `ClassName.methodName > innerName` format; multiple tagged nested functions at the same depth are all rewritten
+- Misuse detection — `@pre`/`@post` on constructors, non-exported initialisers, grandchild functions (nested more than one level deep), IIFEs, and class declarations all emit targeted `[axiom] Warning:` diagnostics; `@invariant` on non-class nodes is similarly reported
 
 ---
 

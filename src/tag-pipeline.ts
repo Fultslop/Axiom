@@ -9,6 +9,7 @@ import {
   expressionUsesResult, expressionUsesPrev,
   KIND_PRE, KIND_POST, PREV_ID,
 } from './contract-utils';
+import { isPublicTarget } from './node-helpers';
 
 const RETURN_TYPE_OK = 'ok' as const;
 const PROMISE_TYPE = 'Promise' as const;
@@ -240,4 +241,143 @@ export function extractAndFilterTags(
   );
 
   return { preTags, postTags, prevCapture };
+}
+
+// ---------------------------------------------------------------------------
+// Nested supported-form detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true for nodes that Phase 2 (tryRewriteFunction) will handle, so
+ * that the `#13` misuse warning should be suppressed in visitNode.
+ *
+ * Rule A — FunctionDeclaration whose grandparent is a public target Block.
+ * Rule B — Arrow/function expression in a `const` whose VariableStatement is
+ *          inside a public-target Block.
+ * Rule C — Arrow/function expression that is the expression of a ReturnStatement
+ *          inside a public-target Block.
+ */
+function isPublicTargetLike(candidate: typescript.Node): boolean {
+  return (
+    (typescript.isFunctionDeclaration(candidate) ||
+      typescript.isMethodDeclaration(candidate) ||
+      typescript.isArrowFunction(candidate)) &&
+    isPublicTarget(candidate)
+  );
+}
+
+function isNestedSupportedFormRuleA(node: typescript.FunctionDeclaration): boolean {
+  const { parent } = node;
+  if (!typescript.isBlock(parent)) {
+    return false;
+  }
+  const grandparent = parent.parent;
+  return (
+    typescript.isFunctionLike(grandparent) &&
+    (typescript.isFunctionDeclaration(grandparent) ||
+      typescript.isMethodDeclaration(grandparent) ||
+      typescript.isArrowFunction(grandparent)) &&
+    isPublicTarget(grandparent)
+  );
+}
+
+function isNestedSupportedFormRuleB(parent: typescript.Node): boolean {
+  if (
+    !typescript.isVariableDeclaration(parent) ||
+    !typescript.isIdentifier(parent.name)
+  ) {
+    return false;
+  }
+  const varDeclList = parent.parent;
+  if (!typescript.isVariableDeclarationList(varDeclList)) {
+    return false;
+  }
+  const varStmt = varDeclList.parent;
+  if (!typescript.isVariableStatement(varStmt)) {
+    return false;
+  }
+  const varStmtParent = varStmt.parent;
+  if (!typescript.isBlock(varStmtParent)) {
+    return false;
+  }
+  const blockParent = varStmtParent.parent;
+  return typescript.isFunctionLike(blockParent) && isPublicTargetLike(blockParent);
+}
+
+function isNestedSupportedFormRuleC(parent: typescript.Node): boolean {
+  if (!typescript.isReturnStatement(parent)) {
+    return false;
+  }
+  const returnParent = parent.parent;
+  if (!typescript.isBlock(returnParent)) {
+    return false;
+  }
+  const blockParent = returnParent.parent;
+  return typescript.isFunctionLike(blockParent) && isPublicTargetLike(blockParent);
+}
+
+export function isNestedSupportedForm(node: typescript.Node): boolean {
+  if (typescript.isFunctionDeclaration(node)) {
+    return isNestedSupportedFormRuleA(node);
+  }
+  if (!typescript.isArrowFunction(node) && !typescript.isFunctionExpression(node)) {
+    return false;
+  }
+  const { parent } = node;
+  if (parent === undefined) {
+    return false;
+  }
+  return isNestedSupportedFormRuleB(parent) || isNestedSupportedFormRuleC(parent);
+}
+
+/**
+ * Returns true if node is an IIFE -- an arrow/function expression used as the
+ * callee of a CallExpression that is not assigned to a variable.
+ *
+ * Example: /* @pre x > 0 * / ((x) => { })(-1)
+ * The JSDoc comment sits above the call expression, not on the arrow itself,
+ * so getJSDocTags(CallExpression) returns nothing. This function provides a
+ * structural shortcut so that the #13 warning can fire for IIFEs correctly.
+ */
+export function isIIFEPattern(node: typescript.Node): boolean {
+  if (!typescript.isCallExpression(node)) {
+    return false;
+  }
+  let callee: typescript.Node = node.expression;
+  // Unwrap parenthesized expressions: ((x) => {})(1) -> callee is ParenExpr -> inner is Arrow
+  while (typescript.isParenthesizedExpression(callee)) {
+    callee = callee.expression;
+  }
+  return (
+    typescript.isArrowFunction(callee) ||
+    typescript.isFunctionExpression(callee)
+  );
+}
+
+/**
+ * Returns true if the callee of an IIFE is a supported nested form (Rule C returned
+ * arrow/function expression). This is used to suppress the IIFE warning when the
+ * IIFE is part of a supported pattern.
+ */
+export function isIIFECalleeSupportedForm(node: typescript.CallExpression): boolean {
+  let callee: typescript.Node = node.expression;
+  while (typescript.isParenthesizedExpression(callee)) {
+    callee = callee.expression;
+  }
+  if (
+    typescript.isArrowFunction(callee) ||
+    typescript.isFunctionExpression(callee)
+  ) {
+    return isNestedSupportedForm(callee);
+  }
+  return false;
+}
+
+/**
+ * Returns true if the given node (a CallExpression that is an IIFE) should NOT
+ * trigger a warning -- i.e., its callee is a supported nested form (Rule C).
+ * This is a convenience wrapper around isIIFECalleeSupportedForm.
+ */
+export function isIIFESupportedForm(node: typescript.Node): boolean {
+  return typescript.isCallExpression(node) && isIIFECalleeSupportedForm(node);
 }

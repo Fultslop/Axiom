@@ -838,3 +838,70 @@ describe('nested function inside class method', () => {
     expect(output).toContain('item.length > 0');
   });
 });
+
+describe('out-of-scope nested patterns', () => {
+  it('does not inject grandchild function — #13 warning still fires', () => {
+    const source = `
+      export function outer(): void {
+        function middle(): void {
+          /** @pre x > 0 */
+          function inner(x: number): void { /* empty */ }
+          inner(1);
+        }
+        middle();
+      }
+    `;
+    const warnings: string[] = [];
+    const output = transform(source, { warn: (msg) => warnings.push(msg) });
+    // Grandchild is not in scope — no require import added for it
+    expect(output).not.toContain('outer > inner');
+    expect(warnings.some((w) => w.includes('inner'))).toBe(true);
+  });
+
+  it('does not inject IIFE — warns', () => {
+    const source = `
+      export function outer(): void {
+        /** @pre x > 0 */
+        ((x: number) => { /* empty */ })(-1);
+      }
+    `;
+    const warnings: string[] = [];
+    transform(source, { warn: (msg) => warnings.push(msg) });
+    // IIFE is not in scope — no require import added for it
+    const iifeWarnings = warnings.filter((w) => w.includes('(anonymous IIFE)'));
+    expect(iifeWarnings.length).toBeGreaterThan(0);
+  });
+
+  it('supported nested forms no longer trigger #13 warning', () => {
+    const source = `
+      export function outer(): void {
+        /** @pre x > 0 */
+        function supported(x: number): void { /* empty */ }
+        supported(1);
+      }
+    `;
+    const warnings: string[] = [];
+    transform(source, { warn: (msg) => warnings.push(msg) });
+    expect(warnings).toHaveLength(0);
+  });
+});
+
+describe('multiple nested functions in the same outer function body', () => {
+  it('rewrites all tagged nested nodes at the same depth', () => {
+    const source = `
+      export function outer(): void {
+        /** @pre x > 0 */
+        function named(x: number): number { return x * 2; }
+        /** @pre y > 0 */
+        const arrow = (y: number): number => y * 3;
+        named(2);
+        arrow(3);
+      }
+    `;
+    const output = transform(source);
+    expect(output).toContain('outer > named');
+    expect(output).toContain('x > 0');
+    expect(output).toContain('outer > arrow');
+    expect(output).toContain('y > 0');
+  });
+});
