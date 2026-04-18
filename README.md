@@ -71,10 +71,25 @@ Add the transformer to your dev tsconfig:
 }
 ```
 
+Declare your project as ESM in `package.json` (required when `verbatimModuleSyntax` is enabled):
+
+```json
+{
+  "type": "module",
+  ...
+}
+```
+
 Add a dev build script to `package.json`:
 
 ```json
 "build:dev": "tspc -p tsconfig.dev.json"
+```
+
+Run the compiled output with:
+
+```bash
+node dist/index.js
 ```
 
 ## Testing with Jest

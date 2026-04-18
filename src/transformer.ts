@@ -429,7 +429,7 @@ function transformSourceFile(
   if (!transformed.value) {
     return visited;
   }
-  const importDecl = buildRequireStatement(nodeFactory);
+  const importDecl = buildRequireStatement(nodeFactory, context.getCompilerOptions().module);
   return nodeFactory.updateSourceFile(visited, [importDecl, ...Array.from(visited.statements)]);
 }
 
