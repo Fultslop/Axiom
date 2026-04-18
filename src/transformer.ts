@@ -2,11 +2,13 @@ import typescript from 'typescript';
 import { buildReparsedIndex, type ReparsedIndex } from './reparsed-index';
 import {
   tryRewriteFunction, isPublicTarget, normaliseArrowBody, type KeepContracts,
+  shouldEmitPre, shouldEmitPost,
 } from './function-rewriter';
 import { tryRewriteClass } from './class-rewriter';
 import { buildRequireStatement } from './require-injection';
 import type { ParamMismatchMode } from './interface-resolver';
 import {
+  extractContractTags,
   extractContractTagsFromNode,
   extractInvariantExpressions,
 } from './jsdoc-parser';
@@ -121,6 +123,71 @@ function emitUnsupportedExpressionWarning(
   }
 }
 
+const CONTRACT_KIND_PRE = 'pre' as const;
+const CONTRACT_KIND_POST = 'post' as const;
+
+function resolveTagsForDropCheck(
+  node: typescript.Node,
+  reparsedFunctions: Map<number, typescript.FunctionLikeDeclaration>,
+): ReturnType<typeof extractContractTagsFromNode> {
+  // Original AST nodes from the compiler pipeline are created without
+  // setParentNodes, so getJSDocTags() returns nothing on them. Look up the
+  // reparsed counterpart (which is created with setParentNodes:true) instead.
+  if (typescript.isFunctionLike(node)) {
+    const reparsed = reparsedFunctions.get(node.pos)
+      ?? (node as typescript.FunctionLikeDeclaration);
+    return extractContractTags(reparsed);
+  }
+  if (typescript.isVariableStatement(node)) {
+    const init = node.declarationList.declarations[0]?.initializer;
+    if (
+      init !== undefined &&
+      (typescript.isArrowFunction(init) || typescript.isFunctionExpression(init))
+    ) {
+      const reparsed = reparsedFunctions.get(init.pos) ?? init;
+      return extractContractTags(reparsed);
+    }
+  }
+  return [];
+}
+
+function hasValidationDroppedContracts(
+  node: typescript.Node,
+  keepContracts: KeepContracts,
+  reparsedFunctions: Map<number, typescript.FunctionLikeDeclaration>,
+): boolean {
+  const tags = resolveTagsForDropCheck(node, reparsedFunctions);
+  const hasPre = shouldEmitPre(keepContracts)
+    && tags.some((tag) => tag.kind === CONTRACT_KIND_PRE);
+  const hasPost = shouldEmitPost(keepContracts)
+    && tags.some((tag) => tag.kind === CONTRACT_KIND_POST);
+  return hasPre || hasPost;
+}
+
+function nodeToEmitForFunction(
+  factory: typescript.NodeFactory,
+  node: typescript.FunctionDeclaration,
+  rewritten: typescript.FunctionLikeDeclaration,
+  keepContracts: KeepContracts,
+  reparsedFunctions: Map<number, typescript.FunctionLikeDeclaration>,
+): typescript.FunctionLikeDeclaration {
+  const contractsDropped = hasValidationDroppedContracts(node, keepContracts, reparsedFunctions);
+  if (rewritten !== node || !contractsDropped) {
+    return rewritten;
+  }
+  // Return a synthetic node (pos=-1) so the printer cannot look up
+  // the original JSDoc from source text.
+  return factory.createFunctionDeclaration(
+    typescript.getModifiers(node),
+    node.asteriskToken,
+    node.name,
+    node.typeParameters,
+    node.parameters,
+    node.type,
+    node.body,
+  );
+}
+
 function isExportedStatement(node: typescript.Node): boolean {
   const mods = typescript.canHaveModifiers(node)
     ? typescript.getModifiers(node) ?? []
@@ -215,6 +282,17 @@ function visitVariableStatement(
     (decl, idx) => decl !== node.declarationList.declarations[idx],
   );
   if (!changed) {
+    if (hasValidationDroppedContracts(node, keepContracts, reparsedIndex.functions)) {
+      // Return a synthetic VariableStatement (pos=-1) so the printer cannot
+      // look up the original JSDoc from source text.
+      return factory.createVariableStatement(
+        modifiers,
+        factory.createVariableDeclarationList(
+          node.declarationList.declarations,
+          node.declarationList.flags,
+        ),
+      );
+    }
     return node;
   }
   const newDeclList = factory.updateVariableDeclarationList(
@@ -264,8 +342,11 @@ function visitNode(
         allowIdentifiers,
         keepContracts,
       );
+      const nodeToEmit = nodeToEmitForFunction(
+        factory, node, rewritten, keepContracts, reparsedIndex.functions,
+      );
       return typescript.visitEachChild(
-        rewritten,
+        nodeToEmit,
         (child) => visitNode(
           factory, child, context, reparsedIndex, transformed, warn,
           checker, reparsedCache, paramMismatch, allowIdentifiers, keepContracts,
@@ -316,59 +397,102 @@ function resolveKeepContracts(
 }
 
 // ---------------------------------------------------------------------------
+// Per-file transformation
+// ---------------------------------------------------------------------------
+
+function transformSourceFile(
+  sourceFile: typescript.SourceFile,
+  context: typescript.TransformationContext,
+  nodeFactory: typescript.NodeFactory,
+  baseKeepContracts: KeepContracts,
+  reparsedCache: Map<string, typescript.SourceFile>,
+  warn: (msg: string) => void,
+  checker: typescript.TypeChecker | undefined,
+  paramMismatch: ParamMismatchMode,
+  allowIdentifiers: string[],
+): typescript.SourceFile {
+  const fileDirective = readFileDirective(sourceFile);
+  const effectiveKeepContracts: KeepContracts = fileDirective !== undefined
+    ? fileDirective
+    : baseKeepContracts;
+  const reparsedIndex = buildReparsedIndex(sourceFile);
+  const transformed = { value: false };
+  const visited = typescript.visitEachChild(
+    sourceFile,
+    (node) => visitNode(
+      nodeFactory, node, context, reparsedIndex, transformed, warn,
+      checker, reparsedCache, paramMismatch, allowIdentifiers,
+      effectiveKeepContracts,
+    ),
+    context,
+  );
+  if (!transformed.value) {
+    return visited;
+  }
+  const importDecl = buildRequireStatement(nodeFactory);
+  return nodeFactory.updateSourceFile(visited, [importDecl, ...Array.from(visited.statements)]);
+}
+
+// ---------------------------------------------------------------------------
 // Transformer entry point
 // ---------------------------------------------------------------------------
 
-// ts-patch plugin entry point. program is optional so the transformer can
-// also be used in transpileModule() for unit testing.
-export default function createTransformer(
-  _program?: typescript.Program,
-  options?: {
-    warn?: (msg: string) => void;
-    interfaceParamMismatch?: 'rename' | 'ignore';
-    allowIdentifiers?: string[];
-    keepContracts?: boolean | 'pre' | 'post' | 'invariant' | 'all';
-  },
-): typescript.TransformerFactory<typescript.SourceFile> {
+export type TransformerOptions = {
+  warn?: (msg: string) => void;
+  interfaceParamMismatch?: 'rename' | 'ignore';
+  allowIdentifiers?: string[];
+  keepContracts?: boolean | 'pre' | 'post' | 'invariant' | 'all';
+};
+
+type ResolvedOptions = {
+  warn: (msg: string) => void;
+  paramMismatch: ParamMismatchMode;
+  allowIdentifiers: string[];
+  keepContracts: KeepContracts;
+};
+
+function resolveTransformerOptions(
+  options: TransformerOptions | undefined,
+): ResolvedOptions {
   const warn = options?.warn ?? ((msg: string): void => {
     process.stderr.write(`${msg}\n`);
   });
   const rawMode = options?.interfaceParamMismatch;
   const paramMismatch: ParamMismatchMode = rawMode === MODE_IGNORE ? 'ignore' : 'rename';
-  const checker = _program?.getTypeChecker?.();
   const allowIdentifiers = options?.allowIdentifiers ?? [];
   const keepContracts = resolveKeepContracts(options?.keepContracts);
+  return { warn, paramMismatch, allowIdentifiers, keepContracts };
+}
+
+// ts-patch plugin entry point. program is optional so the transformer can
+// also be used in transpileModule() for unit testing.
+export default function createTransformer(
+  _program?: typescript.Program,
+  options?: TransformerOptions,
+): typescript.TransformerFactory<typescript.SourceFile> {
+  const { warn, paramMismatch, allowIdentifiers, keepContracts } =
+    resolveTransformerOptions(options);
+  const checker = _program?.getTypeChecker?.();
   const reparsedCache = new Map<string, typescript.SourceFile>();
 
   return (context: typescript.TransformationContext) => {
     // Use the compiler's own factory so synthesized nodes are compatible
     // with the AST nodes created by the host TypeScript instance.
-    const { factory } = context;
-
-    return (sourceFile: typescript.SourceFile): typescript.SourceFile => {
-      const fileDirective = readFileDirective(sourceFile);
-      const effectiveKeepContracts: KeepContracts = fileDirective !== undefined
-        ? fileDirective
-        : keepContracts;
-      const reparsedIndex = buildReparsedIndex(sourceFile);
-      const transformed = { value: false };
-      const visited = typescript.visitEachChild(
-        sourceFile,
-        (node) => visitNode(
-          factory, node, context, reparsedIndex, transformed, warn,
-          checker, reparsedCache, paramMismatch, allowIdentifiers,
-          effectiveKeepContracts,
-        ),
-        context,
+    const { factory: nodeFactory } = context;
+    return (sourceFile: typescript.SourceFile): typescript.SourceFile =>
+      transformSourceFile(
+        sourceFile, context, nodeFactory, keepContracts, reparsedCache,
+        warn, checker, paramMismatch, allowIdentifiers,
       );
-
-      if (!transformed.value) {
-        return visited;
-      }
-
-      const importDecl = buildRequireStatement(factory);
-      return factory.updateSourceFile(visited, [importDecl, ...Array.from(visited.statements)]);
-    };
   };
 }
+
+// ts-jest v29+ requires these named exports on AST transformers.
+export const name = 'axiom-transformer';
+export const version = 1;
+export const factory = (
+  _ts: typeof typescript,
+  opts?: Parameters<typeof createTransformer>[1],
+  program?: typescript.Program,
+): typescript.TransformerFactory<typescript.SourceFile> => createTransformer(program, opts);
 

@@ -464,6 +464,21 @@ describe('async void return type — @post result drop', () => {
         w.includes("return type is 'void'") || w.includes("return type is 'never'")),
     ).toBe(false);
   });
+
+  it('B8 — injects @post guard on async function whose body contains an early throw', () => {
+    const source = `
+      /**
+       * @post result > 0
+       */
+      export async function asyncWithThrow(x: number): Promise<number> {
+        if (x < 0) throw new Error('fail');
+        return x;
+      }
+    `;
+    const output = transform(source);
+    expect(output).toContain('throw new Error');
+    expect(output).toContain('ContractViolationError("POST"');
+  });
 });
 
 describe('async result type mismatch detection', () => {

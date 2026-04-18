@@ -57,6 +57,15 @@ function reifyCompositeExpression(
       Array.from(node.arguments).map((arg) => reifyExpression(factory, arg)),
     );
   }
+  if (typescript.isNewExpression(node)) {
+    return factory.createNewExpression(
+      reifyExpression(factory, node.expression),
+      undefined,
+      node.arguments
+        ? Array.from(node.arguments).map((arg) => reifyExpression(factory, arg))
+        : undefined,
+    );
+  }
   if (typescript.isElementAccessExpression(node)) {
     return factory.createElementAccessExpression(
       reifyExpression(factory, node.expression),
@@ -244,6 +253,22 @@ function reifyCaseClause(
 
 /* eslint-enable @typescript-eslint/no-use-before-define */
 
+function reifyJumpStatement(
+  factory: typescript.NodeFactory,
+  node: typescript.Statement,
+): typescript.Statement | undefined {
+  if (typescript.isBreakStatement(node)) {
+    return factory.createBreakStatement(node.label);
+  }
+  if (typescript.isContinueStatement(node)) {
+    return factory.createContinueStatement(node.label);
+  }
+  if (typescript.isThrowStatement(node)) {
+    return factory.createThrowStatement(reifyExpression(factory, node.expression));
+  }
+  return undefined;
+}
+
 /**
  * Rebuilds a statement node using factory calls, producing a fully synthesized
  * AST for printing against any SourceFile.
@@ -294,12 +319,9 @@ export function reifyStatement(
     );
   }
 
-  if (typescript.isBreakStatement(node)) {
-    return factory.createBreakStatement(node.label);
-  }
-
-  if (typescript.isContinueStatement(node)) {
-    return factory.createContinueStatement(node.label);
+  const jumpResult = reifyJumpStatement(factory, node);
+  if (jumpResult !== undefined) {
+    return jumpResult;
   }
 
   const loopResult = reifyLoopStatement(factory, node);
