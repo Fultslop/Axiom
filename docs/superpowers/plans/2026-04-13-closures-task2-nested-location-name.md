@@ -1,5 +1,7 @@
 # Closures — Task 2: Add `buildNestedLocationName` to `node-helpers.ts`
 
+Status: Complete
+
 > **Sequence:** This is step 2 of 9. No prior tasks required (can run in parallel with Task 1).
 > **For agentic workers:** Use `superpowers:executing-plans` to implement this task.
 

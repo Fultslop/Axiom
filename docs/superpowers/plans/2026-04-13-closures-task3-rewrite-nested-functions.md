@@ -1,5 +1,7 @@
 # Closures — Task 3: Add nested rewriter and wire into `tryRewriteFunction`
 
+Status: Complete
+
 > **Sequence:** This is step 3 of 9. Requires Tasks 1 and 2 to be complete.
 > **For agentic workers:** Use `superpowers:executing-plans` to implement this task.
 

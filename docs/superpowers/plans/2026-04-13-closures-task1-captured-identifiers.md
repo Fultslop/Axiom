@@ -1,5 +1,7 @@
 # Closures — Task 1: Export `extractBindingNames` and add `buildCapturedIdentifiers`
 
+Status: Complete
+
 > **Sequence:** This is step 1 of 9. No prior tasks required.
 > **For agentic workers:** Use `superpowers:executing-plans` to implement this task.
 

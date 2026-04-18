@@ -86,7 +86,30 @@ export function buildLocationName(node: typescript.FunctionLikeDeclaration): str
   return 'anonymous';
 }
 
-function extractBindingNames(
+export function buildNestedLocationName(
+  outerNode: typescript.FunctionLikeDeclaration,
+  innerNode: typescript.FunctionLikeDeclaration,
+  variableName?: string,
+): string {
+  const outerName = buildLocationName(outerNode);
+
+  let innerName: string;
+  if (
+    typescript.isFunctionDeclaration(innerNode) &&
+    innerNode.name !== undefined &&
+    typescript.isIdentifier(innerNode.name)
+  ) {
+    innerName = innerNode.name.text;
+  } else if (variableName !== undefined) {
+    innerName = variableName;
+  } else {
+    innerName = '(anonymous)';
+  }
+
+  return `${outerName} > ${innerName}`;
+}
+
+export function extractBindingNames(
   name: typescript.BindingName,
   names: Set<string>,
 ): void {
@@ -118,4 +141,30 @@ export function buildKnownIdentifiers(
     names.add('prev');
   }
   return names;
+}
+
+export function buildCapturedIdentifiers(
+  outerNode: typescript.FunctionLikeDeclaration,
+  innerStatementIndex: number,
+): Set<string> {
+  const captured = new Set<string>();
+
+  for (const param of outerNode.parameters) {
+    extractBindingNames(param.name, captured);
+  }
+
+  const outerBody = outerNode.body;
+  if (outerBody === undefined || !typescript.isBlock(outerBody)) {
+    return captured;
+  }
+  const { statements } = outerBody;
+  for (let idx = 0; idx < innerStatementIndex; idx++) {
+    const stmt = statements[idx];
+    if (stmt !== undefined && typescript.isVariableStatement(stmt)) {
+      for (const decl of stmt.declarationList.declarations) {
+        extractBindingNames(decl.name, captured);
+      }
+    }
+  }
+  return captured;
 }

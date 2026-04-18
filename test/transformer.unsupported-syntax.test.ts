@@ -284,7 +284,7 @@ describe('transformer — unsupported syntax and misuse warnings', () => {
       ).toBe(true);
     });
 
-    it('warns for function declaration nested inside another function', () => {
+    it('rewrites function declaration nested inside another function', () => {
       const source = `
         export function outer(x: number): number {
           /** @pre x > 0 */
@@ -293,10 +293,11 @@ describe('transformer — unsupported syntax and misuse warnings', () => {
         }
       `;
       const warnings: string[] = [];
-      transpileWithWarn(source, (msg) => warnings.push(msg));
+      const output = transpileWithWarn(source, (msg) => warnings.push(msg));
       expect(
         warnings.some((w) => w.includes('closures') && w.includes('inner')),
-      ).toBe(true);
+      ).toBe(false);
+      expect(output).toContain('outer > inner');
     });
   });
 

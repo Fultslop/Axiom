@@ -3,9 +3,12 @@ import {
   buildPreCheck, buildPostCheck, buildBodyCapture, buildResultReturn,
   buildCheckInvariantsCall, buildPrevCapture,
 } from './ast-builder';
-import { buildLocationName, buildKnownIdentifiers, isPublicTarget } from './node-helpers';
+import {
+  buildLocationName, buildKnownIdentifiers, isPublicTarget,
+  buildNestedLocationName, buildCapturedIdentifiers,
+} from './node-helpers';
 import { buildParameterTypes, buildPostParamTypes } from './type-helpers';
-import type { ContractTag } from './jsdoc-parser';
+import { type ContractTag, extractContractTags } from './jsdoc-parser';
 import type { InterfaceMethodContracts } from './interface-resolver';
 import {
   type KeepContracts,
@@ -261,6 +264,221 @@ function noContractsToEmit(
   );
 }
 
+function rewriteNestedFunctionLike(
+  innerNode: typescript.FunctionLikeDeclaration,
+  outerNode: typescript.FunctionLikeDeclaration,
+  statementIndex: number,
+  ctx: TransformerContext,
+  variableName?: string,
+): typescript.FunctionLikeDeclaration | null {
+  const { factory, warn, checker, allowIdentifiers, keepContracts } = ctx;
+  const reparsedFunctions = ctx.reparsedIndex.functions;
+
+  const reparsedNode = reparsedFunctions.get(innerNode.pos) ?? innerNode;
+  const tags = extractContractTags(reparsedNode);
+  if (tags.length === 0) {
+    return null;
+  }
+
+  const location = buildNestedLocationName(
+    outerNode, innerNode, variableName,
+  );
+
+  const preKnown = buildKnownIdentifiers(innerNode, false);
+  const postKnown = buildKnownIdentifiers(innerNode, true);
+  const captured = buildCapturedIdentifiers(outerNode, statementIndex);
+  for (const name of captured) {
+    preKnown.add(name);
+    postKnown.add(name);
+  }
+  enrichKnownIdentifiers(preKnown, postKnown, checker, innerNode, allowIdentifiers);
+
+  const sourceFile = innerNode.getSourceFile();
+  const exportedNames = sourceFile
+    ? collectExportedNames(sourceFile)
+    : new Set<string>();
+
+  const paramTypes = checker !== undefined
+    ? buildParameterTypes(innerNode, checker)
+    : undefined;
+  const postParamTypes = buildPostParamTypes(innerNode, checker, paramTypes);
+
+  const { preTags, postTags, prevCapture } = extractAndFilterTags(
+    innerNode, reparsedNode, undefined, location, warn,
+    preKnown, postKnown, checker, paramTypes, postParamTypes,
+  );
+
+  if (noContractsToEmit(preTags, postTags, null, keepContracts)) {
+    return null;
+  }
+
+  const originalBody = innerNode.body;
+  if (originalBody === undefined || !typescript.isBlock(originalBody)) {
+    return null;
+  }
+
+  const asyncFlag = isAsyncFunction(innerNode);
+  const newStatements = buildGuardedStatements(
+    factory, preTags, postTags, originalBody, location,
+    null, prevCapture, exportedNames, keepContracts, asyncFlag,
+  );
+  return applyNewBody(
+    factory, innerNode, factory.createBlock(newStatements, true),
+  );
+}
+
+function rewriteRuleA(
+  stmt: typescript.FunctionDeclaration,
+  outerNode: typescript.FunctionLikeDeclaration,
+  stmtIndex: number,
+  ctx: TransformerContext,
+): typescript.FunctionDeclaration | null {
+  if (stmt.body === undefined) {
+    return null;
+  }
+  const rewritten = rewriteNestedFunctionLike(
+    stmt, outerNode, stmtIndex, ctx,
+  );
+  return rewritten !== null
+    ? rewritten as typescript.FunctionDeclaration
+    : null;
+}
+
+function rewriteRuleB(
+  decl: typescript.VariableDeclaration,
+  outerNode: typescript.FunctionLikeDeclaration,
+  stmtIndex: number,
+  ctx: TransformerContext,
+): typescript.VariableDeclaration | null {
+  const init = decl.initializer;
+  if (init === undefined) {
+    return null;
+  }
+  if (!typescript.isArrowFunction(init) && !typescript.isFunctionExpression(init)) {
+    return null;
+  }
+  const variableName = typescript.isIdentifier(decl.name)
+    ? decl.name.text
+    : undefined;
+  let funcNode: typescript.FunctionLikeDeclaration = init;
+  if (typescript.isArrowFunction(init)) {
+    funcNode = normaliseArrowBody(ctx.factory, init);
+  }
+  const rewritten = rewriteNestedFunctionLike(
+    funcNode, outerNode, stmtIndex, ctx, variableName,
+  );
+  if (rewritten === null) {
+    return null;
+  }
+  return ctx.factory.updateVariableDeclaration(
+    decl, decl.name, decl.exclamationToken, decl.type,
+    rewritten as typescript.Expression,
+  );
+}
+
+function rewriteRuleC(
+  returnStmt: typescript.ReturnStatement,
+  outerNode: typescript.FunctionLikeDeclaration,
+  stmtIndex: number,
+  ctx: TransformerContext,
+): typescript.ReturnStatement | null {
+  const expr = returnStmt.expression;
+  if (expr === undefined) {
+    return null;
+  }
+  if (!typescript.isArrowFunction(expr) && !typescript.isFunctionExpression(expr)) {
+    return null;
+  }
+  let funcNode: typescript.FunctionLikeDeclaration = expr;
+  if (typescript.isArrowFunction(expr)) {
+    funcNode = normaliseArrowBody(ctx.factory, expr);
+  }
+  const rewritten = rewriteNestedFunctionLike(
+    funcNode, outerNode, stmtIndex, ctx,
+  );
+  if (rewritten === null) {
+    return null;
+  }
+  return ctx.factory.updateReturnStatement(
+    returnStmt, rewritten as typescript.Expression,
+  );
+}
+
+function tryRewriteVariableStatement(
+  stmt: typescript.VariableStatement,
+  outerNode: typescript.FunctionLikeDeclaration,
+  stmtIndex: number,
+  ctx: TransformerContext,
+): typescript.VariableStatement | null {
+  const { factory } = ctx;
+  const newDecls: typescript.VariableDeclaration[] = [];
+  let declChanged = false;
+  for (const decl of stmt.declarationList.declarations) {
+    const rewritten = rewriteRuleB(decl, outerNode, stmtIndex, ctx);
+    if (rewritten !== null) {
+      newDecls.push(rewritten);
+      declChanged = true;
+    } else {
+      newDecls.push(decl);
+    }
+  }
+  if (!declChanged) {
+    return null;
+  }
+  const newDeclList = factory.updateVariableDeclarationList(
+    stmt.declarationList, newDecls,
+  );
+  const modifiers = typescript.canHaveModifiers(stmt)
+    ? typescript.getModifiers(stmt) ?? []
+    : [];
+  return factory.updateVariableStatement(stmt, modifiers, newDeclList);
+}
+
+function rewriteSingleStatement(
+  stmt: typescript.Statement,
+  outerNode: typescript.FunctionLikeDeclaration,
+  stmtIndex: number,
+  ctx: TransformerContext,
+): typescript.Statement | null {
+  if (typescript.isFunctionDeclaration(stmt) && stmt.body !== undefined) {
+    return rewriteRuleA(stmt, outerNode, stmtIndex, ctx);
+  }
+  if (typescript.isVariableStatement(stmt)) {
+    return tryRewriteVariableStatement(stmt, outerNode, stmtIndex, ctx);
+  }
+  if (typescript.isReturnStatement(stmt)) {
+    return rewriteRuleC(stmt, outerNode, stmtIndex, ctx);
+  }
+  return null;
+}
+
+function rewriteNestedFunctions(
+  outerNode: typescript.FunctionLikeDeclaration,
+  body: typescript.Block,
+  ctx: TransformerContext,
+): typescript.Block {
+  const { factory } = ctx;
+  const newStatements: typescript.Statement[] = [];
+  let anyRewritten = false;
+
+  const statements = Array.from(body.statements);
+  for (const [idx, stmt] of statements.entries()) {
+    const rewritten = rewriteSingleStatement(stmt, outerNode, idx, ctx);
+    if (rewritten !== null) {
+      newStatements.push(rewritten);
+      anyRewritten = true;
+    } else {
+      newStatements.push(stmt);
+    }
+  }
+
+  if (!anyRewritten) {
+    return body;
+  }
+  ctx.transformed.value = true;
+  return factory.createBlock(newStatements, true);
+}
+
 function rewriteFunction(
   node: typescript.FunctionLikeDeclaration,
   ctx: TransformerContext,
@@ -320,11 +538,24 @@ export function tryRewriteFunction(
     const rewritten = rewriteFunction(
       node, ctx, invariantExpressions, interfaceMethodContracts, locationNode,
     );
-    if (rewritten === null) {
-      return node;
+    const workingNode = rewritten ?? node;
+    if (rewritten !== null) {
+      ctx.transformed.value = true;
     }
-    ctx.transformed.value = true;
-    return rewritten;
+
+    // Phase 2: rewrite nested function-like nodes
+    const workingBody = workingNode.body;
+    if (workingBody !== undefined && typescript.isBlock(workingBody)) {
+      const nestedBody = rewriteNestedFunctions(workingNode, workingBody, ctx);
+      if (nestedBody !== workingBody) {
+        const updated = applyNewBody(ctx.factory, workingNode, nestedBody);
+        if (updated !== null) {
+          return updated;
+        }
+      }
+    }
+
+    return workingNode;
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     ctx.warn(

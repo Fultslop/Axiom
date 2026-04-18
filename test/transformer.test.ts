@@ -587,3 +587,181 @@ describe('@prev with async method', () => {
     await expect(queue.push('a')).resolves.toBe(1);
   });
 });
+
+describe('buildCapturedIdentifiers — outer param and preceding const in known set', () => {
+  it('does not warn when @pre references outer parameter by name', () => {
+    const source = `
+      export function outer(limit: number): void {
+        /** @pre x < limit */
+        function check(x: number): void { /* empty */ }
+        check(5);
+      }
+    `;
+    const warnings: string[] = [];
+    transform(source, { warn: (msg) => warnings.push(msg) });
+    expect(warnings).toHaveLength(0);
+  });
+
+  it('does not warn when @pre references a preceding const binding', () => {
+    const source = `
+      export function outer(): void {
+        const MAX = 100;
+        /** @pre x <= MAX */
+        function check(x: number): void { /* empty */ }
+        check(50);
+      }
+    `;
+    const warnings: string[] = [];
+    transform(source, { warn: (msg) => warnings.push(msg) });
+    expect(warnings).toHaveLength(0);
+  });
+
+  it('still warns when @pre references a truly unknown identifier', () => {
+    const source = `
+      export function outer(): void {
+        /** @pre ghost > 0 */
+        function inner(x: number): number { return x; }
+        inner(1);
+      }
+    `;
+    const warnings: string[] = [];
+    transform(source, { warn: (msg) => warnings.push(msg) });
+    expect(warnings.some((w) => w.includes('ghost'))).toBe(true);
+  });
+});
+
+describe('nested location string format', () => {
+  it('uses OuterName > innerName for named inner function', () => {
+    const source = `
+      export function processItems(items: string[]): string[] {
+        /** @pre item.length > 0 */
+        function sanitise(item: string): string { return item.trim(); }
+        return items.map(sanitise);
+      }
+    `;
+    const output = transform(source);
+    expect(output).toContain('processItems > sanitise');
+  });
+
+  it('uses OuterName > variableName for const-assigned arrow', () => {
+    const source = `
+      export function makeAdder(base: number) {
+        /** @pre x > 0 */
+        const add = (x: number): number => base + x;
+        return add;
+      }
+    `;
+    const output = transform(source);
+    expect(output).toContain('makeAdder > add');
+  });
+
+  it('uses OuterName > (anonymous) for returned arrow', () => {
+    const source = `
+      export function makeAdder(base: number) {
+        /** @pre x > 0 */
+        return (x: number): number => base + x;
+      }
+    `;
+    const output = transform(source);
+    expect(output).toContain('makeAdder > (anonymous)');
+  });
+});
+
+describe('nested function contract injection', () => {
+  it('injects @pre into named inner FunctionDeclaration (Rule A)', () => {
+    const source = `
+      export function processItems(items: string[]): string[] {
+        /** @pre item.length > 0 */
+        function sanitise(item: string): string { return item.trim(); }
+        return items.map(sanitise);
+      }
+    `;
+    const output = transform(source);
+    expect(output).toContain('processItems > sanitise');
+    expect(output).toContain('item.length > 0');
+  });
+
+  it('injects @pre into const-assigned arrow function (Rule B)', () => {
+    const source = `
+      export function makeAdder(base: number) {
+        /** @pre x > 0 */
+        const add = (x: number): number => base + x;
+        return add;
+      }
+    `;
+    const output = transform(source);
+    expect(output).toContain('makeAdder > add');
+    expect(output).toContain('x > 0');
+  });
+
+  it('injects @pre into const-assigned function expression (Rule B)', () => {
+    const source = `
+      export function outer(): void {
+        /** @pre n > 0 */
+        const square = function(n: number): number { return n * n; };
+        square(4);
+      }
+    `;
+    const output = transform(source);
+    expect(output).toContain('outer > square');
+    expect(output).toContain('n > 0');
+  });
+
+  it('injects @pre into returned arrow function capturing outer param (Rule C)', () => {
+    const source = `
+      export function makeAdder(base: number) {
+        /**
+         * @pre x > 0
+         * @pre base >= 0
+         */
+        return (x: number): number => base + x;
+      }
+    `;
+    const warnings: string[] = [];
+    const output = transform(source, { warn: (msg) => warnings.push(msg) });
+    expect(warnings).toHaveLength(0);
+    expect(output).toContain('makeAdder > (anonymous)');
+    expect(output).toContain('x > 0');
+    expect(output).toContain('base >= 0');
+  });
+
+  it('injects both outer and inner contracts independently', () => {
+    const source = `
+      /** @pre items.length > 0 */
+      export function processItems(items: string[]): string[] {
+        /** @pre item.length > 0 */
+        function sanitise(item: string): string { return item.trim(); }
+        return items.map(sanitise);
+      }
+    `;
+    const output = transform(source);
+    expect(output).toContain('items.length > 0');
+    expect(output).toContain('processItems > sanitise');
+    expect(output).toContain('item.length > 0');
+  });
+
+  it('skips inner function with no tags — no injection, no warning', () => {
+    const source = `
+      export function outer(): void {
+        function helper(x: number): number { return x; }
+        helper(1);
+      }
+    `;
+    const warnings: string[] = [];
+    const output = transform(source, { warn: (msg) => warnings.push(msg) });
+    expect(warnings).toHaveLength(0);
+    expect(output).not.toContain('require("@fultslop/axiom")');
+  });
+
+  it('require import injected only when at least one assertion is added', () => {
+    const source = `
+      export function outer(): void {
+        /** @pre x > 0 */
+        function inner(x: number): void { /* empty */ }
+        inner(1);
+      }
+    `;
+    const output = transform(source);
+    expect(output).toContain('require("@fultslop/axiom")');
+  });
+});
