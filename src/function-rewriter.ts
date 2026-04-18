@@ -1,67 +1,20 @@
 import typescript from 'typescript';
 import {
   buildPreCheck, buildPostCheck, buildBodyCapture, buildResultReturn,
-  parseContractExpression, buildCheckInvariantsCall, buildPrevCapture,
+  buildCheckInvariantsCall, buildPrevCapture,
 } from './ast-builder';
-import { validateExpression } from './contract-validator';
 import { buildLocationName, buildKnownIdentifiers, isPublicTarget } from './node-helpers';
-import { buildParameterTypes, buildPostParamTypes, type TypeMapValue } from './type-helpers';
+import { buildParameterTypes, buildPostParamTypes } from './type-helpers';
 import type { ContractTag } from './jsdoc-parser';
-import { extractContractTags, extractPrevExpression } from './jsdoc-parser';
 import type { InterfaceMethodContracts } from './interface-resolver';
-
-const KIND_PRE = 'pre' as const;
-const KIND_POST = 'post' as const;
-const RESULT_ID = 'result' as const;
-const RETURN_TYPE_OK = 'ok' as const;
-const PREV_ID = 'prev' as const;
-
-const KEEP_PRE = 'pre' as const;
-const KEEP_POST = 'post' as const;
-const KEEP_INVARIANT = 'invariant' as const;
-const KEEP_ALL = 'all' as const;
-
-export type KeepContracts = false | 'pre' | 'post' | 'invariant' | 'all';
-
-
-export function shouldEmitPre(keepContracts: KeepContracts): boolean {
-  if (keepContracts === false) {
-    return true;
-  }
-  if (keepContracts === KEEP_PRE) {
-    return true;
-  }
-  if (keepContracts === KEEP_ALL) {
-    return true;
-  }
-  return false;
-}
-
-export function shouldEmitPost(keepContracts: KeepContracts): boolean {
-  if (keepContracts === false) {
-    return true;
-  }
-  if (keepContracts === KEEP_POST) {
-    return true;
-  }
-  if (keepContracts === KEEP_ALL) {
-    return true;
-  }
-  return false;
-}
-
-export function shouldEmitInvariant(keepContracts: KeepContracts): boolean {
-  if (keepContracts === false) {
-    return true;
-  }
-  if (keepContracts === KEEP_INVARIANT) {
-    return true;
-  }
-  if (keepContracts === KEEP_ALL) {
-    return true;
-  }
-  return false;
-}
+import {
+  type KeepContracts,
+  shouldEmitPre,
+  shouldEmitPost,
+  shouldEmitInvariant,
+} from './keep-contracts';
+import { extractAndFilterTags } from './tag-pipeline';
+import type { TransformerContext } from './transformer-context';
 
 function allContractsFiltered(
   preTags: ContractTag[],
@@ -73,125 +26,6 @@ function allContractsFiltered(
   const activePost = shouldEmitPost(keepContracts) ? postTags.length : 0;
   const activeInv = shouldEmitInvariant(keepContracts) && invariantCall !== null ? 1 : 0;
   return activePre === 0 && activePost === 0 && activeInv === 0;
-}
-
-export function expressionUsesResult(expression: string): boolean {
-  try {
-    const parsed = parseContractExpression(expression);
-    let found = false;
-    function walk(node: typescript.Node): void {
-      if (!found) {
-        if (typescript.isIdentifier(node) && node.text === RESULT_ID) {
-          found = true;
-        } else {
-          typescript.forEachChild(node, walk);
-        }
-      }
-    }
-    walk(parsed);
-    return found;
-  } catch {
-    return false;
-  }
-}
-
-const PROMISE_TYPE = 'Promise' as const;
-
-function resolvePromiseTypeArg(
-  typeNode: typescript.TypeNode,
-): typescript.SyntaxKind | undefined {
-  if (!typescript.isTypeReferenceNode(typeNode)) {
-    return undefined;
-  }
-  const typeName = typescript.isIdentifier(typeNode.typeName)
-    ? typeNode.typeName.text
-    : undefined;
-  if (typeName !== PROMISE_TYPE) {
-    return undefined;
-  }
-  const args = typeNode.typeArguments;
-  if (args === undefined || args.length !== 1) {
-    return undefined;
-  }
-  const inner = args[0]!.kind;
-  if (
-    inner === typescript.SyntaxKind.VoidKeyword ||
-    inner === typescript.SyntaxKind.NeverKeyword ||
-    inner === typescript.SyntaxKind.UndefinedKeyword
-  ) {
-    return inner;
-  }
-  return undefined;
-}
-
-function returnTypeDescription(node: typescript.FunctionLikeDeclaration): string | undefined {
-  const typeNode = node.type;
-  if (typeNode === undefined) {
-    return undefined;
-  }
-  if (
-    typeNode.kind === typescript.SyntaxKind.VoidKeyword ||
-    typeNode.kind === typescript.SyntaxKind.NeverKeyword ||
-    typeNode.kind === typescript.SyntaxKind.UndefinedKeyword
-  ) {
-    return typescript.tokenToString(typeNode.kind) ?? 'void';
-  }
-  const innerKind = resolvePromiseTypeArg(typeNode);
-  if (innerKind !== undefined) {
-    return typescript.tokenToString(innerKind) ?? 'void';
-  }
-  return RETURN_TYPE_OK;
-}
-
-function filterPostTagsWithResult(
-  postTags: ContractTag[],
-  node: typescript.FunctionLikeDeclaration,
-  location: string,
-  warn: (msg: string) => void,
-): ContractTag[] {
-  const desc = returnTypeDescription(node);
-  return postTags.filter((tag) => {
-    if (!expressionUsesResult(tag.expression)) {
-      return true;
-    }
-    if (desc === undefined) {
-      warn(
-        `[axiom] Contract validation warning in ${location}:`
-        + `\n  @post ${tag.expression}`
-        + ` — 'result' used but no return type is declared; @post dropped`,
-      );
-      return false;
-    }
-    if (desc !== RETURN_TYPE_OK) {
-      warn(
-        `[axiom] Contract validation warning in ${location}:`
-        + `\n  @post ${tag.expression}`
-        + ` — 'result' used but return type is '${desc}'; @post dropped`,
-      );
-      return false;
-    }
-    return true;
-  });
-}
-
-function expressionUsesPrev(expression: string): boolean {
-  try {
-    const parsed = parseContractExpression(expression);
-    let found = false;
-    function walk(node: typescript.Node): void {
-      if (!found) {
-        if (typescript.isIdentifier(node) && node.text === PREV_ID) {
-          found = true;
-        } else {
-          typescript.forEachChild(node, walk);
-        }
-      }
-    }
-    walk(parsed);
-    return found;
-  } catch {
-    return false;
-  }
 }
 
 function buildScopeIdentifiers(
@@ -240,13 +74,13 @@ function collectExportedNames(
   return exported;
 }
 
-function mergeIdentifiers(
+function enrichKnownIdentifiers(
   preKnown: Set<string>,
   postKnown: Set<string>,
   checker: typescript.TypeChecker | undefined,
   node: typescript.FunctionLikeDeclaration,
   allowIdentifiers: string[],
-): Set<string> {
+): void {
   if (checker !== undefined) {
     const scopeIds = buildScopeIdentifiers(node, checker);
     for (const scopeId of scopeIds) {
@@ -258,101 +92,6 @@ function mergeIdentifiers(
     preKnown.add(allowedId);
     postKnown.add(allowedId);
   }
-  const sourceFile = node.getSourceFile();
-  return sourceFile ? collectExportedNames(sourceFile) : new Set<string>();
-}
-
-function resolvePrevCapture(
-  node: typescript.FunctionLikeDeclaration,
-  reparsedNode: typescript.FunctionLikeDeclaration,
-  interfaceMethodContracts: InterfaceMethodContracts | undefined,
-  location: string,
-  warn: (msg: string) => void,
-): string | null {
-  // 1. Class-level @prev tag
-  const classPrev = extractPrevExpression(reparsedNode);
-  if (classPrev !== undefined) {
-    // Check for multiple @prev tags
-    const jsDocTags = typescript.getJSDocTags(reparsedNode);
-    const prevTags = jsDocTags.filter(
-      (tag) => tag.tagName.text.toLowerCase() === PREV_ID,
-    );
-    if (prevTags.length > 1) {
-      warn(
-        `[axiom] Contract validation warning in ${location}:`
-        + `\n  multiple @prev tags found — using first`,
-      );
-    }
-    return classPrev;
-  }
-
-  // 2. Interface-level @prev
-  if (interfaceMethodContracts?.prevExpression !== undefined) {
-    return interfaceMethodContracts.prevExpression;
-  }
-
-  // 3. Default for methods: shallow clone
-  if (typescript.isMethodDeclaration(node)) {
-    return '{ ...this }';
-  }
-
-  // 4. Standalone function: no default
-  return null;
-}
-
-function filterPostTagsRequiringPrev(
-  postTags: ContractTag[],
-  prevCapture: string | null,
-  location: string,
-  warn: (msg: string) => void,
-): ContractTag[] {
-  return postTags.filter((tag) => {
-    if (!expressionUsesPrev(tag.expression)) {
-      return true;
-    }
-    if (prevCapture === null) {
-      warn(
-        `[axiom] Contract validation warning in ${location}:`
-        + `\n  @post ${tag.expression}`
-        + ` — 'prev' used but no @prev capture available; @post dropped`,
-      );
-      return false;
-    }
-    return true;
-  });
-}
-
-export function filterValidTags(
-  tags: ContractTag[],
-  kind: 'pre' | 'post',
-  location: string,
-  warn: (msg: string) => void,
-  knownIdentifiers: Set<string>,
-  paramTypes?: Map<string, TypeMapValue>,
-  checker?: typescript.TypeChecker,
-  contextNode?: typescript.FunctionLikeDeclaration,
-): ContractTag[] {
-  return tags.filter((tag) => {
-    const errors = validateExpression(
-      parseContractExpression(tag.expression),
-      tag.expression,
-      location,
-      knownIdentifiers,
-      paramTypes,
-      checker,
-      contextNode,
-    );
-    if (errors.length > 0) {
-      errors.forEach((err) => {
-        warn(
-          `[axiom] Contract validation warning in ${location}:`
-          + `\n  @${kind} ${err.expression} — ${err.message}`,
-        );
-      });
-      return false;
-    }
-    return true;
-  });
 }
 
 function buildGuardedStatements(
@@ -502,22 +241,6 @@ function buildInvariantCallIfNeeded(
   return null;
 }
 
-function buildTagInputs(
-  classTags: ContractTag[],
-  interfaceMethodContracts: InterfaceMethodContracts | undefined,
-): { allPreInput: ContractTag[]; allPostInput: ContractTag[] } {
-  return {
-    allPreInput: [
-      ...(interfaceMethodContracts?.preTags ?? []),
-      ...classTags.filter((tag) => tag.kind === KIND_PRE),
-    ],
-    allPostInput: [
-      ...(interfaceMethodContracts?.postTags ?? []),
-      ...classTags.filter((tag) => tag.kind === KIND_POST),
-    ],
-  };
-}
-
 function shouldSkipRewrite(
   preTags: ContractTag[],
   postTags: ContractTag[],
@@ -538,61 +261,16 @@ function noContractsToEmit(
   );
 }
 
-function extractAndFilterTags(
-  node: typescript.FunctionLikeDeclaration,
-  reparsedNode: typescript.FunctionLikeDeclaration,
-  interfaceMethodContracts: InterfaceMethodContracts | undefined,
-  location: string,
-  warn: (msg: string) => void,
-  preKnown: Set<string>,
-  postKnown: Set<string>,
-  checker: typescript.TypeChecker | undefined,
-  paramTypes: Map<string, TypeMapValue> | undefined,
-  postParamTypes: Map<string, TypeMapValue> | undefined,
-): {
-  preTags: ContractTag[];
-  postTags: ContractTag[];
-  prevCapture: string | null;
-} {
-  const classTags = extractContractTags(reparsedNode);
-  const { allPreInput, allPostInput } = buildTagInputs(classTags, interfaceMethodContracts);
-
-  const preTags = filterValidTags(
-    allPreInput, KIND_PRE, location, warn, preKnown, paramTypes, checker, node,
-  );
-  const postTagsWithResult = filterPostTagsWithResult(allPostInput, node, location, warn);
-
-  const anyPostUsesPrev = postTagsWithResult.some((tag) => expressionUsesPrev(tag.expression));
-
-  let prevCapture: string | null = null;
-  if (anyPostUsesPrev) {
-    prevCapture = resolvePrevCapture(
-      node, reparsedNode, interfaceMethodContracts, location, warn,
-    );
-  }
-  const postTagsFiltered = filterPostTagsRequiringPrev(
-    postTagsWithResult, prevCapture, location, warn,
-  );
-
-  const postTags = filterValidTags(
-    postTagsFiltered, KIND_POST, location, warn, postKnown, postParamTypes, checker, node,
-  );
-
-  return { preTags, postTags, prevCapture };
-}
-
 function rewriteFunction(
-  factory: typescript.NodeFactory,
   node: typescript.FunctionLikeDeclaration,
-  reparsedFunctions: Map<number, typescript.FunctionLikeDeclaration>,
-  warn: (msg: string) => void,
-  checker?: typescript.TypeChecker,
+  ctx: TransformerContext,
   invariantExpressions: string[] = [],
   interfaceMethodContracts?: InterfaceMethodContracts,
-  allowIdentifiers: string[] = [],
-  keepContracts: KeepContracts = false,
   locationNode: typescript.FunctionLikeDeclaration = node,
 ): typescript.FunctionLikeDeclaration | null {
+  const { factory, warn, checker, allowIdentifiers, keepContracts } = ctx;
+  const reparsedFunctions = ctx.reparsedIndex.functions;
+
   const originalBody = node.body;
   if (!originalBody || !typescript.isBlock(originalBody)) {
     return null;
@@ -603,7 +281,9 @@ function rewriteFunction(
   const location = buildLocationName(locationNode);
   const preKnown = buildKnownIdentifiers(node, false);
   const postKnown = buildKnownIdentifiers(node, true);
-  const exportedNames = mergeIdentifiers(preKnown, postKnown, checker, node, allowIdentifiers);
+  enrichKnownIdentifiers(preKnown, postKnown, checker, node, allowIdentifiers);
+  const sourceFile = node.getSourceFile();
+  const exportedNames = sourceFile ? collectExportedNames(sourceFile) : new Set<string>();
   const paramTypes = checker !== undefined ? buildParameterTypes(node, checker) : undefined;
   const postParamTypes = buildPostParamTypes(node, checker, paramTypes);
 
@@ -630,30 +310,26 @@ function rewriteFunction(
 }
 
 export function tryRewriteFunction(
-  factory: typescript.NodeFactory,
   node: typescript.FunctionLikeDeclaration,
-  reparsedFunctions: Map<number, typescript.FunctionLikeDeclaration>,
-  transformed: { value: boolean },
-  warn: (msg: string) => void,
-  checker?: typescript.TypeChecker,
-  invariantExpressions: string[] = [],
+  ctx: TransformerContext,
+  invariantExpressions?: string[],
   interfaceMethodContracts?: InterfaceMethodContracts,
-  allowIdentifiers: string[] = [],
-  keepContracts: KeepContracts = false,
   locationNode?: typescript.FunctionLikeDeclaration,
 ): typescript.FunctionLikeDeclaration {
   try {
     const rewritten = rewriteFunction(
-      factory, node, reparsedFunctions, warn, checker,
-      invariantExpressions, interfaceMethodContracts, allowIdentifiers, keepContracts,
-      locationNode,
+      node, ctx, invariantExpressions, interfaceMethodContracts, locationNode,
     );
     if (rewritten === null) {
       return node;
     }
-    transformed.value = true;
+    ctx.transformed.value = true;
     return rewritten;
-  } catch {
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    ctx.warn(
+      `[axiom] Internal error in ${buildLocationName(node)}: ${errMsg}`,
+    );
     return node;
   }
 }

@@ -11,9 +11,14 @@ import {
 } from './jsdoc-parser';
 import { validateExpression } from './contract-validator';
 import {
-  tryRewriteFunction, isPublicTarget, expressionUsesResult, filterValidTags,
-  type KeepContracts, shouldEmitPre, shouldEmitPost, shouldEmitInvariant,
+  tryRewriteFunction, isPublicTarget,
 } from './function-rewriter';
+import { filterValidTags } from './tag-pipeline';
+import {
+  shouldEmitPre,
+  shouldEmitPost,
+  shouldEmitInvariant,
+} from './keep-contracts';
 import { buildKnownIdentifiers } from './node-helpers';
 import { buildParameterTypes } from './type-helpers';
 import type { ContractTag } from './jsdoc-parser';
@@ -21,34 +26,13 @@ import {
   resolveInterfaceContracts,
   type InterfaceContracts,
   type InterfaceMethodContracts,
-  type ParamMismatchMode,
 } from './interface-resolver';
-import type { ReparsedIndex } from './reparsed-index';
+import {
+  KIND_PRE, KIND_POST, expressionUsesResult, expressionUsesPrev,
+} from './contract-utils';
+import type { TransformerContext } from './transformer-context';
 
 const CHECK_INVARIANTS_NAME = '#checkInvariants' as const;
-const KIND_PRE = 'pre' as const;
-const KIND_POST = 'post' as const;
-const PREV_ID = 'prev' as const;
-
-function expressionUsesPrev(expression: string): boolean {
-  try {
-    const parsed = parseContractExpression(expression);
-    let found = false;
-    function walk(node: typescript.Node): void {
-      if (!found) {
-        if (typescript.isIdentifier(node) && node.text === PREV_ID) {
-          found = true;
-        } else {
-          typescript.forEachChild(node, walk);
-        }
-      }
-    }
-    walk(parsed);
-    return found;
-  } catch {
-    return false;
-  }
-}
 
 function filterConstructorPostTags(
   postTags: ContractTag[],
@@ -158,13 +142,13 @@ function hasClashingMember(node: typescript.ClassDeclaration): boolean {
 
 function buildConstructorKnown(
   node: typescript.ConstructorDeclaration,
-  checker: typescript.TypeChecker | undefined,
-  allowIdentifiers: string[],
+  ctx: TransformerContext,
 ): {
   preKnown: Set<string>;
   postKnown: Set<string>;
   paramTypes: ReturnType<typeof buildParameterTypes> | undefined;
 } {
+  const { checker, allowIdentifiers } = ctx;
   const preKnown = buildKnownIdentifiers(node, false);
   const postKnown = buildKnownIdentifiers(node, false);
   const paramTypes = checker !== undefined ? buildParameterTypes(node, checker) : undefined;
@@ -199,31 +183,25 @@ function buildConstructorBodyStatements(
 }
 
 function rewriteConstructor(
-  factory: typescript.NodeFactory,
   node: typescript.ConstructorDeclaration,
   className: string,
-  reparsedIndex: ReparsedIndex,
+  ctx: TransformerContext,
   effectiveInvariants: string[],
-  warn: (msg: string) => void,
-  checker: typescript.TypeChecker | undefined,
-  allowIdentifiers: string[],
-  keepContracts: KeepContracts,
 ): typescript.ConstructorDeclaration {
+  const { factory, warn, checker, keepContracts } = ctx;
   const originalBody = node.body;
   if (!originalBody) {
     return node;
   }
   const location = className;
-  const reparsedNode = reparsedIndex.functions.get(node.pos) ?? node;
+  const reparsedNode = ctx.reparsedIndex.functions.get(node.pos) ?? node;
   const allTags = extractContractTags(reparsedNode);
   const allPreInput = allTags.filter((tag) => tag.kind === KIND_PRE);
   const allPostInput = allTags.filter((tag) => tag.kind === KIND_POST);
 
   const filteredPost = filterConstructorPostTags(allPostInput, className, warn);
 
-  const { preKnown, postKnown, paramTypes } = buildConstructorKnown(
-    node, checker, allowIdentifiers,
-  );
+  const { preKnown, postKnown, paramTypes } = buildConstructorKnown(node, ctx);
 
   const preTags = filterValidTags(
     allPreInput, KIND_PRE, location, warn, preKnown, paramTypes, checker, node,
@@ -260,11 +238,11 @@ function rewriteConstructor(
 
 function lookupIfaceMethodContracts(
   member: typescript.MethodDeclaration,
-  reparsedIndex: ReparsedIndex,
+  ctx: TransformerContext,
   interfaceContracts: InterfaceContracts,
   className: string,
-  warn: (msg: string) => void,
 ): InterfaceMethodContracts | undefined {
+  const { warn } = ctx;
   if (!typescript.isIdentifier(member.name)) {
     return undefined;
   }
@@ -273,7 +251,7 @@ function lookupIfaceMethodContracts(
   if (ifaceContracts === undefined) {
     return undefined;
   }
-  const reparsedNode = reparsedIndex.functions.get(member.pos) ?? member;
+  const reparsedNode = ctx.reparsedIndex.functions.get(member.pos) ?? member;
   const location = `${className}.${methodName}`;
   emitMethodMergeWarnings(
     ifaceContracts, reparsedNode, location, className, warn,
@@ -282,26 +260,18 @@ function lookupIfaceMethodContracts(
 }
 
 function rewriteMember(
-  factory: typescript.NodeFactory,
   member: typescript.ClassElement,
-  reparsedIndex: ReparsedIndex,
-  transformed: { value: boolean },
-  warn: (msg: string) => void,
-  checker: typescript.TypeChecker | undefined,
+  ctx: TransformerContext,
   effectiveInvariants: string[],
   className: string,
   interfaceContracts: InterfaceContracts,
-  allowIdentifiers: string[] = [],
-  keepContracts: KeepContracts = false,
 ): { element: typescript.ClassElement; changed: boolean } {
   if (typescript.isMethodDeclaration(member) && isPublicTarget(member)) {
     const ifaceMethodContracts = lookupIfaceMethodContracts(
-      member, reparsedIndex, interfaceContracts, className, warn,
+      member, ctx, interfaceContracts, className,
     );
     const rewritten = tryRewriteFunction(
-      factory, member, reparsedIndex.functions, transformed, warn,
-      checker, effectiveInvariants, ifaceMethodContracts, allowIdentifiers,
-      keepContracts,
+      member, ctx, effectiveInvariants, ifaceMethodContracts,
     );
     return {
       element: rewritten as typescript.MethodDeclaration,
@@ -309,10 +279,7 @@ function rewriteMember(
     };
   }
   if (typescript.isConstructorDeclaration(member)) {
-    const rewritten = rewriteConstructor(
-      factory, member, className, reparsedIndex,
-      effectiveInvariants, warn, checker, allowIdentifiers, keepContracts,
-    );
+    const rewritten = rewriteConstructor(member, className, ctx, effectiveInvariants);
     return { element: rewritten, changed: rewritten !== member };
   }
   return { element: member, changed: false };
@@ -349,27 +316,17 @@ function resolveEffectiveInvariants(
 }
 
 function rewriteMembers(
-  factory: typescript.NodeFactory,
   members: readonly typescript.ClassElement[],
-  reparsedIndex: ReparsedIndex,
-  transformed: { value: boolean },
-  warn: (msg: string) => void,
-  checker: typescript.TypeChecker | undefined,
+  ctx: TransformerContext,
   effectiveInvariants: string[],
   className: string,
   interfaceContracts: InterfaceContracts,
-  allowIdentifiers: string[] = [],
-  keepContracts: KeepContracts = false,
 ): { elements: typescript.ClassElement[]; changed: boolean } {
   let classTransformed = false;
   const newMembers: typescript.ClassElement[] = [];
 
   members.forEach((member) => {
-    const result = rewriteMember(
-      factory, member, reparsedIndex, transformed, warn, checker,
-      effectiveInvariants, className, interfaceContracts, allowIdentifiers,
-      keepContracts,
-    );
+    const result = rewriteMember(member, ctx, effectiveInvariants, className, interfaceContracts);
     if (result.changed) {
       classTransformed = true;
     }
@@ -381,12 +338,12 @@ function rewriteMembers(
 
 function emitClassBodyWarning(
   node: typescript.ClassDeclaration,
-  reparsedIndex: ReparsedIndex,
+  ctx: TransformerContext,
   className: string,
-  warn: (msg: string) => void,
 ): void {
+  const { warn } = ctx;
   const classContractTags = extractContractTagsFromNode(node);
-  const reparsedClass = reparsedIndex.classes.get(node.pos) ?? node;
+  const reparsedClass = ctx.reparsedIndex.classes.get(node.pos) ?? node;
   const reparsedClassContractTags = extractContractTagsFromNode(reparsedClass);
   if (classContractTags.length > 0 || reparsedClassContractTags.length > 0) {
     warn(
@@ -398,13 +355,10 @@ function emitClassBodyWarning(
 
 function resolveClassContracts(
   node: typescript.ClassDeclaration,
-  reparsedIndex: ReparsedIndex,
+  ctx: TransformerContext,
   className: string,
-  warn: (msg: string) => void,
-  checker: typescript.TypeChecker | undefined,
-  cache: Map<string, typescript.SourceFile>,
-  mode: ParamMismatchMode,
 ): { interfaceContracts: InterfaceContracts; effectiveInvariants: string[] } {
+  const { warn, checker } = ctx;
   if (checker === undefined && hasImplementsClauses(node)) {
     warn(
       `[axiom] Interface contract resolution skipped in ${node.getSourceFile().fileName}:`
@@ -413,9 +367,9 @@ function resolveClassContracts(
     );
   }
   const interfaceContracts: InterfaceContracts = checker !== undefined
-    ? resolveInterfaceContracts(node, checker, cache, warn, mode)
+    ? resolveInterfaceContracts(node, checker, ctx.reparsedCache, warn, ctx.paramMismatch)
     : { methods: new Map(), invariants: [] };
-  const reparsedClass = reparsedIndex.classes.get(node.pos) ?? node;
+  const reparsedClass = ctx.reparsedIndex.classes.get(node.pos) ?? node;
   const effectiveInvariants = resolveEffectiveInvariants(
     node, reparsedClass, className, warn, interfaceContracts.invariants,
   );
@@ -423,30 +377,19 @@ function resolveClassContracts(
 }
 
 function rewriteClass(
-  factory: typescript.NodeFactory,
   node: typescript.ClassDeclaration,
-  reparsedIndex: ReparsedIndex,
-  transformed: { value: boolean },
-  warn: (msg: string) => void,
-  checker: typescript.TypeChecker | undefined,
-  cache: Map<string, typescript.SourceFile>,
-  mode: ParamMismatchMode,
-  allowIdentifiers: string[] = [],
-  keepContracts: KeepContracts = false,
+  ctx: TransformerContext,
 ): typescript.ClassDeclaration {
+  const { factory, keepContracts } = ctx;
   const className = node.name?.text ?? 'UnknownClass';
 
-  emitClassBodyWarning(node, reparsedIndex, className, warn);
+  emitClassBodyWarning(node, ctx, className);
 
-  const { interfaceContracts, effectiveInvariants } = resolveClassContracts(
-    node, reparsedIndex, className, warn, checker, cache, mode,
-  );
+  const { interfaceContracts, effectiveInvariants } = resolveClassContracts(node, ctx, className);
 
   const invariantsForMembers = shouldEmitInvariant(keepContracts) ? effectiveInvariants : [];
   const { elements: newMembers, changed: classTransformed } = rewriteMembers(
-    factory, node.members, reparsedIndex, transformed, warn, checker,
-    invariantsForMembers, className, interfaceContracts, allowIdentifiers,
-    keepContracts,
+    node.members, ctx, invariantsForMembers, className, interfaceContracts,
   );
 
   const finalMembers = [...newMembers];
@@ -461,7 +404,7 @@ function rewriteClass(
     return node;
   }
 
-  transformed.value = true;
+  ctx.transformed.value = true;
   return factory.updateClassDeclaration(
     node,
     typescript.getModifiers(node),
@@ -473,23 +416,17 @@ function rewriteClass(
 }
 
 export function tryRewriteClass(
-  factory: typescript.NodeFactory,
   node: typescript.ClassDeclaration,
-  reparsedIndex: ReparsedIndex,
-  transformed: { value: boolean },
-  warn: (msg: string) => void,
-  checker?: typescript.TypeChecker,
-  cache: Map<string, typescript.SourceFile> = new Map(),
-  mode: ParamMismatchMode = 'rename',
-  allowIdentifiers: string[] = [],
-  keepContracts: KeepContracts = false,
+  ctx: TransformerContext,
 ): typescript.ClassDeclaration {
   try {
-    return rewriteClass(
-      factory, node, reparsedIndex, transformed, warn, checker, cache,
-      mode, allowIdentifiers, keepContracts,
+    return rewriteClass(node, ctx);
+  } catch (err) {
+    const className = node.name?.text ?? 'UnknownClass';
+    const errMsg = err instanceof Error ? err.message : String(err);
+    ctx.warn(
+      `[axiom] Internal error in ${className}: ${errMsg}`,
     );
-  } catch {
     return node;
   }
 }

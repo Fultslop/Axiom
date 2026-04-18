@@ -1,12 +1,13 @@
 import typescript from 'typescript';
-import { buildReparsedIndex, type ReparsedIndex } from './reparsed-index';
+import { buildReparsedIndex } from './reparsed-index';
 import {
-  tryRewriteFunction, isPublicTarget, normaliseArrowBody, type KeepContracts,
-  shouldEmitPre, shouldEmitPost,
+  tryRewriteFunction, isPublicTarget, normaliseArrowBody,
 } from './function-rewriter';
+import { type KeepContracts, shouldEmitPre, shouldEmitPost } from './keep-contracts';
 import { tryRewriteClass } from './class-rewriter';
 import { buildRequireStatement } from './require-injection';
 import type { ParamMismatchMode } from './interface-resolver';
+import type { TransformerContext } from './transformer-context';
 import {
   extractContractTags,
   extractContractTagsFromNode,
@@ -57,6 +58,7 @@ function readFileDirective(
 
 function resolveDisplayName(node: typescript.Node): string {
   if (
+    node.parent &&
     typescript.isVariableDeclaration(node.parent) &&
     typescript.isIdentifier(node.parent.name)
   ) {
@@ -95,32 +97,11 @@ function emitMisuseWarnings(node: typescript.Node, warn: (msg: string) => void):
   }
 }
 
-function emitUnsupportedClosureWarning(
-  node: typescript.FunctionDeclaration,
-  warn: (msg: string) => void,
-): void {
-  const contractTags = extractContractTagsFromNode(node);
-  if (contractTags.length > 0) {
-    const funcName = node.name?.text ?? '(anonymous)';
-    warn(
-      '[axiom] Warning: @pre/@post on arrow functions, function expressions, and closures'
-      + ` is not supported — contracts were not injected (in ${funcName})`,
-    );
-  }
-}
-
-function emitUnsupportedExpressionWarning(
-  node: typescript.ArrowFunction | typescript.FunctionExpression,
-  warn: (msg: string) => void,
-): void {
-  const contractTags = extractContractTagsFromNode(node);
-  if (contractTags.length > 0) {
-    const displayName = resolveDisplayName(node);
-    warn(
-      '[axiom] Warning: @pre/@post on arrow functions, function expressions, and closures'
-      + ` is not supported — contracts were not injected (in ${displayName})`,
-    );
-  }
+function emitUnsupportedFunctionWarning(name: string, warn: (msg: string) => void): void {
+  warn(
+    '[axiom] Warning: @pre/@post on arrow functions, function expressions, and closures'
+    + ` is not supported — contracts were not injected (in ${name})`,
+  );
 }
 
 const CONTRACT_KIND_PRE = 'pre' as const;
@@ -200,15 +181,10 @@ function isExportedStatement(node: typescript.Node): boolean {
 // ---------------------------------------------------------------------------
 
 function rewriteVariableDeclaration(
-  factory: typescript.NodeFactory,
   decl: typescript.VariableDeclaration,
-  reparsedIndex: ReparsedIndex,
-  transformed: { value: boolean },
-  warn: (msg: string) => void,
-  checker: typescript.TypeChecker | undefined,
-  allowIdentifiers: string[],
-  keepContracts: KeepContracts,
+  ctx: TransformerContext,
 ): typescript.VariableDeclaration {
+  const { factory } = ctx;
   const init = decl.initializer;
   if (init === undefined) {
     return decl;
@@ -228,19 +204,7 @@ function rewriteVariableDeclaration(
   } else {
     funcNode = init;
   }
-  const rewritten = tryRewriteFunction(
-    factory,
-    funcNode,
-    reparsedIndex.functions,
-    transformed,
-    warn,
-    checker,
-    [],
-    undefined,
-    allowIdentifiers,
-    keepContracts,
-    init,
-  );
+  const rewritten = tryRewriteFunction(funcNode, ctx, [], undefined, init);
   if (rewritten === funcNode) {
     return decl;
   }
@@ -254,15 +218,10 @@ function rewriteVariableDeclaration(
 }
 
 function visitVariableStatement(
-  factory: typescript.NodeFactory,
   node: typescript.VariableStatement,
-  reparsedIndex: ReparsedIndex,
-  transformed: { value: boolean },
-  warn: (msg: string) => void,
-  checker: typescript.TypeChecker | undefined,
-  allowIdentifiers: string[],
-  keepContracts: KeepContracts,
+  ctx: TransformerContext,
 ): typescript.VariableStatement {
+  const { factory, keepContracts } = ctx;
   const modifiers = typescript.canHaveModifiers(node)
     ? typescript.getModifiers(node) ?? []
     : [];
@@ -273,16 +232,13 @@ function visitVariableStatement(
     return node;
   }
   const newDeclarations = node.declarationList.declarations.map((decl) =>
-    rewriteVariableDeclaration(
-      factory, decl, reparsedIndex, transformed, warn, checker, allowIdentifiers,
-      keepContracts,
-    ),
+    rewriteVariableDeclaration(decl, ctx),
   );
   const changed = newDeclarations.some(
     (decl, idx) => decl !== node.declarationList.declarations[idx],
   );
   if (!changed) {
-    if (hasValidationDroppedContracts(node, keepContracts, reparsedIndex.functions)) {
+    if (hasValidationDroppedContracts(node, keepContracts, ctx.reparsedIndex.functions)) {
       // Return a synthetic VariableStatement (pos=-1) so the printer cannot
       // look up the original JSDoc from source text.
       return factory.createVariableStatement(
@@ -306,84 +262,59 @@ function visitVariableStatement(
 // Node visitor
 // ---------------------------------------------------------------------------
 
+// eslint-disable-next-line complexity
 function visitNode(
-  factory: typescript.NodeFactory,
   node: typescript.Node,
-  context: typescript.TransformationContext,
-  reparsedIndex: ReparsedIndex,
-  transformed: { value: boolean },
-  warn: (msg: string) => void,
-  checker: typescript.TypeChecker | undefined,
-  reparsedCache: Map<string, typescript.SourceFile>,
-  paramMismatch: ParamMismatchMode,
-  allowIdentifiers: string[],
-  keepContracts: KeepContracts,
+  tsContext: typescript.TransformationContext,
+  ctx: TransformerContext,
 ): typescript.Node {
+  const { factory, warn, keepContracts } = ctx;
+
   if (typescript.isClassDeclaration(node)) {
-    return tryRewriteClass(
-      factory, node, reparsedIndex, transformed, warn,
-      checker, reparsedCache, paramMismatch, allowIdentifiers, keepContracts,
-    );
+    return tryRewriteClass(node, ctx);
   }
 
   emitMisuseWarnings(node, warn);
 
   if (typescript.isFunctionDeclaration(node)) {
     if (isPublicTarget(node)) {
-      const rewritten = tryRewriteFunction(
-        factory,
-        node,
-        reparsedIndex.functions,
-        transformed,
-        warn,
-        checker,
-        [],
-        undefined,
-        allowIdentifiers,
-        keepContracts,
-      );
+      const rewritten = tryRewriteFunction(node, ctx);
       const nodeToEmit = nodeToEmitForFunction(
-        factory, node, rewritten, keepContracts, reparsedIndex.functions,
+        factory, node, rewritten, keepContracts, ctx.reparsedIndex.functions,
       );
       return typescript.visitEachChild(
         nodeToEmit,
-        (child) => visitNode(
-          factory, child, context, reparsedIndex, transformed, warn,
-          checker, reparsedCache, paramMismatch, allowIdentifiers, keepContracts,
-        ),
-        context,
+        (child) => visitNode(child, tsContext, ctx),
+        tsContext,
       );
     }
-    emitUnsupportedClosureWarning(node, warn);
+    if (extractContractTagsFromNode(node).length > 0) {
+      emitUnsupportedFunctionWarning(node.name?.text ?? '(anonymous)', warn);
+    }
+    return typescript.visitEachChild(
+      node,
+      (child) => visitNode(child, tsContext, ctx),
+      tsContext,
+    );
   }
 
   if (
     (typescript.isArrowFunction(node) || typescript.isFunctionExpression(node)) &&
     node.parent?.kind !== typescript.SyntaxKind.VariableDeclaration
   ) {
-    emitUnsupportedExpressionWarning(node, warn);
+    if (extractContractTagsFromNode(node).length > 0) {
+      emitUnsupportedFunctionWarning(resolveDisplayName(node), warn);
+    }
   }
 
   if (typescript.isVariableStatement(node) && isExportedStatement(node)) {
-    return visitVariableStatement(
-      factory,
-      node,
-      reparsedIndex,
-      transformed,
-      warn,
-      checker,
-      allowIdentifiers,
-      keepContracts,
-    );
+    return visitVariableStatement(node, ctx);
   }
 
   return typescript.visitEachChild(
     node,
-    (child) => visitNode(
-      factory, child, context, reparsedIndex, transformed, warn,
-      checker, reparsedCache, paramMismatch, allowIdentifiers, keepContracts,
-    ),
-    context,
+    (child) => visitNode(child, tsContext, ctx),
+    tsContext,
   );
 }
 
@@ -402,35 +333,27 @@ function resolveKeepContracts(
 
 function transformSourceFile(
   sourceFile: typescript.SourceFile,
-  context: typescript.TransformationContext,
-  nodeFactory: typescript.NodeFactory,
-  baseKeepContracts: KeepContracts,
-  reparsedCache: Map<string, typescript.SourceFile>,
-  warn: (msg: string) => void,
-  checker: typescript.TypeChecker | undefined,
-  paramMismatch: ParamMismatchMode,
-  allowIdentifiers: string[],
+  tsContext: typescript.TransformationContext,
+  baseCtx: TransformerContext,
 ): typescript.SourceFile {
   const fileDirective = readFileDirective(sourceFile);
-  const effectiveKeepContracts: KeepContracts = fileDirective !== undefined
-    ? fileDirective
-    : baseKeepContracts;
-  const reparsedIndex = buildReparsedIndex(sourceFile);
-  const transformed = { value: false };
+  const ctx: TransformerContext = {
+    ...baseCtx,
+    keepContracts: fileDirective ?? baseCtx.keepContracts,
+    reparsedIndex: buildReparsedIndex(sourceFile),
+    transformed: { value: false },
+  };
+
   const visited = typescript.visitEachChild(
     sourceFile,
-    (node) => visitNode(
-      nodeFactory, node, context, reparsedIndex, transformed, warn,
-      checker, reparsedCache, paramMismatch, allowIdentifiers,
-      effectiveKeepContracts,
-    ),
-    context,
+    (node) => visitNode(node, tsContext, ctx),
+    tsContext,
   );
-  if (!transformed.value) {
+  if (!ctx.transformed.value) {
     return visited;
   }
-  const importDecl = buildRequireStatement(nodeFactory, context.getCompilerOptions().module);
-  return nodeFactory.updateSourceFile(visited, [importDecl, ...Array.from(visited.statements)]);
+  const importDecl = buildRequireStatement(ctx.factory, tsContext.getCompilerOptions().module);
+  return ctx.factory.updateSourceFile(visited, [importDecl, ...Array.from(visited.statements)]);
 }
 
 // ---------------------------------------------------------------------------
@@ -475,15 +398,20 @@ export default function createTransformer(
   const checker = _program?.getTypeChecker?.();
   const reparsedCache = new Map<string, typescript.SourceFile>();
 
-  return (context: typescript.TransformationContext) => {
-    // Use the compiler's own factory so synthesized nodes are compatible
-    // with the AST nodes created by the host TypeScript instance.
-    const { factory: nodeFactory } = context;
+  return (tsContext: typescript.TransformationContext) => {
+    const baseCtx: TransformerContext = {
+      factory: tsContext.factory,
+      warn,
+      checker,
+      allowIdentifiers,
+      keepContracts,
+      paramMismatch,
+      reparsedIndex: { functions: new Map(), classes: new Map() }, // replaced per file
+      reparsedCache,
+      transformed: { value: false },                               // replaced per file
+    };
     return (sourceFile: typescript.SourceFile): typescript.SourceFile =>
-      transformSourceFile(
-        sourceFile, context, nodeFactory, keepContracts, reparsedCache,
-        warn, checker, paramMismatch, allowIdentifiers,
-      );
+      transformSourceFile(sourceFile, tsContext, baseCtx);
   };
 }
 

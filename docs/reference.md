@@ -273,3 +273,20 @@ export const fetch = /** @pre id > 0 */ async (id: number): Promise<User> => db.
 /** @pre id > 0 */
 export async function fetch(id: number): Promise<User> { return db.query(id); }
 ```
+
+**6. Unsupported expression constructs drop all contracts with an internal error warning** — the contract reifier handles a defined set of expression and statement node kinds. When a contract expression contains an unsupported construct (e.g. an array literal, an arrow function, or a `void` expression), or when the function body contains a `try/catch` block, the reifier cannot process the function and emits an `[axiom] Internal error` warning. All contracts on that function are dropped — no pre/post injection occurs.
+```typescript
+// Internal error — array literal not supported in contract expressions
+/** @post result === [1, 2, 3] */
+export function getItems(): number[] { … }
+
+// Internal error — arrow function not supported in contract expressions
+/** @post result === items.map(x => x * 2) */
+export function doubled(items: number[]): number[] { … }
+
+// Internal error — try/catch body prevents reification
+/** @pre amount > 0 */
+export function parse(amount: number): number {
+  try { return JSON.parse(String(amount)); } catch { return 0; }
+}
+```
