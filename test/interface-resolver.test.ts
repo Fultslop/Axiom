@@ -1,8 +1,10 @@
 import typescript from 'typescript';
 import {
   resolveInterfaceContracts,
+  resolveBaseClassContracts,
   type ParamMismatchMode,
   type InterfaceContracts,
+  type BaseClassContracts,
 } from '@src/interface-resolver';
 
 // Helper: build a single-file Program with TypeChecker
@@ -340,5 +342,50 @@ describe('resolveInterfaceContracts — @prev inheritance', () => {
       classDecl, checker, cache, (msg) => warnings.push(msg), 'rename',
     );
     expect(contracts.methods.get('bar')!.prevExpression).toBe('this.balance');
+  });
+});
+
+function runBaseClassResolver(
+  program: typescript.Program,
+  fileName: string,
+  mode: ParamMismatchMode = 'rename',
+): { contracts: BaseClassContracts; warnings: string[] } {
+  const checker = program.getTypeChecker();
+  const classDecl = getClassDecl(program, fileName);
+  const cache = new Map<string, typescript.SourceFile>();
+  const warnings: string[] = [];
+  const contracts = resolveBaseClassContracts(
+    classDecl, checker, cache, (msg) => warnings.push(msg), mode,
+  );
+  return { contracts, warnings };
+}
+
+describe('resolveBaseClassContracts', () => {
+  it('returns empty result when class has no extends clause', () => {
+    const program = buildProgram('test.ts', `
+      class Animal {
+        /** @pre amount > 0 */
+        feed(amount: number): void {}
+      }
+    `);
+    const { contracts, warnings } = runBaseClassResolver(program, 'test.ts');
+    expect(contracts.methods.size).toBe(0);
+    expect(contracts.invariants).toHaveLength(0);
+    expect(warnings).toHaveLength(0);
+  });
+
+  it('returns empty result when base class has no contracts', () => {
+    const program = buildProgram('test.ts', `
+      class Animal {
+        feed(amount: number): void {}
+      }
+      class Dog extends Animal {
+        feed(amount: number): void {}
+      }
+    `);
+    const { contracts, warnings } = runBaseClassResolver(program, 'test.ts');
+    expect(contracts.methods.size).toBe(0);
+    expect(contracts.invariants).toHaveLength(0);
+    expect(warnings).toHaveLength(0);
   });
 });

@@ -26,6 +26,11 @@ export interface InterfaceContracts {
   invariants: string[];
 }
 
+export interface BaseClassContracts {
+  methods: Map<string, InterfaceMethodContracts>;
+  invariants: string[];
+}
+
 function reparseCached(
   sourceFile: typescript.SourceFile,
   cache: Map<string, typescript.SourceFile>,
@@ -82,6 +87,25 @@ function findInterfaceByPos(
   let found: typescript.InterfaceDeclaration | undefined;
   function visit(node: typescript.Node): void {
     if (found === undefined && typescript.isInterfaceDeclaration(node)) {
+      if (node.pos === pos) {
+        found = node;
+      }
+    }
+    if (found === undefined) {
+      typescript.forEachChild(node, visit);
+    }
+  }
+  visit(sourceFile);
+  return found;
+}
+
+function findClassByPos(
+  sourceFile: typescript.SourceFile,
+  pos: number,
+): typescript.ClassDeclaration | undefined {
+  let found: typescript.ClassDeclaration | undefined;
+  function visit(node: typescript.Node): void {
+    if (found === undefined && typescript.isClassDeclaration(node)) {
       if (node.pos === pos) {
         found = node;
       }
@@ -332,5 +356,22 @@ export function resolveInterfaceContracts(
     }
   });
 
+  return result;
+}
+
+export function resolveBaseClassContracts(
+  _classNode: typescript.ClassDeclaration,
+  _checker: typescript.TypeChecker,
+  _cache: Map<string, typescript.SourceFile>,
+  _warn: (msg: string) => void,
+  _mode: ParamMismatchMode,
+): BaseClassContracts {
+  const result: BaseClassContracts = {
+    methods: new Map<string, InterfaceMethodContracts>(),
+    invariants: [],
+  };
+  // findClassByPos will be used in Task 2 when resolving extends clause
+  const sourceFile = _classNode.getSourceFile();
+  findClassByPos(sourceFile, -1);
   return result;
 }
