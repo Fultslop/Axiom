@@ -28,7 +28,11 @@ export function transform(
   return result.outputText;
 }
 
-export function transformWithProgram(source: string, warn?: (msg: string) => void): string {
+export function transformWithProgram(
+  source: string,
+  warn?: (msg: string) => void,
+  mismatchMode?: 'rename' | 'ignore',
+): string {
   const fileName = 'virtual-test.ts';
   const compilerOptions: typescript.CompilerOptions = {
     target: typescript.ScriptTarget.ES2020,
@@ -53,14 +57,21 @@ export function transformWithProgram(source: string, warn?: (msg: string) => voi
   };
   const program = typescript.createProgram([fileName], compilerOptions, customHost);
   const sourceFile = program.getSourceFile(fileName)!;
-  const options = warn !== undefined ? { warn } : undefined;
+  const options: Parameters<typeof createTransformer>[1] = {};
+  if (warn !== undefined) {
+    options.warn = warn;
+  }
+  if (mismatchMode !== undefined) {
+    options.interfaceParamMismatch = mismatchMode;
+  }
+  const transformerOptions = Object.keys(options).length > 0 ? options : undefined;
   let output = '';
   program.emit(
     sourceFile,
     (_, text) => { output = text; },
     undefined,
     false,
-    { before: [createTransformer(program, options)] },
+    { before: [createTransformer(program, transformerOptions)] },
   );
   return output;
 }

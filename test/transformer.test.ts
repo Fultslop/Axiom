@@ -588,6 +588,46 @@ describe('@prev with async method', () => {
   });
 });
 
+describe('base class contract inheritance', () => {
+  it('Dog.feed inherits @pre from Animal.feed', () => {
+    const source = `
+      class Animal {
+        /** @pre amount > 0 */
+        feed(amount: number): void {}
+      }
+      export class Dog extends Animal {
+        energy = 0;
+        feed(amount: number): void { this.energy += amount; }
+      }
+    `;
+    const js = transformWithProgram(source, () => {});
+    const DogClass = evalTransformedWith(js, 'Dog') as new () => { feed: (n: number) => void };
+    const dog = new DogClass();
+    expect(() => dog.feed(-1)).toThrow();
+    expect(() => dog.feed(5)).not.toThrow();
+  });
+
+  it('Dog.feed inherits @post from Animal.feed', () => {
+    const source = `
+      class Animal {
+        energy = 0;
+        /**
+         * @post this.energy > 0
+         */
+        feed(amount: number): void { this.energy += amount; }
+      }
+      export class Dog extends Animal {
+        energy = 0;
+        feed(amount: number): void { this.energy = -1; }
+      }
+    `;
+    const js = transformWithProgram(source, () => {});
+    const DogClass = evalTransformedWith(js, 'Dog') as new () => { feed: (n: number) => void };
+    const dog = new DogClass();
+    expect(() => dog.feed(5)).toThrow();
+  });
+});
+
 describe('buildCapturedIdentifiers — outer param and preceding const in known set', () => {
   it('does not warn when @pre references outer parameter by name', () => {
     const source = `

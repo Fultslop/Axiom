@@ -118,6 +118,24 @@ function findClassByPos(
   return found;
 }
 
+function findBaseClassMethodParams(
+  classDecl: typescript.ClassDeclaration,
+  methodName: string,
+): string[] {
+  const method = Array.from(classDecl.members).find(
+    (member): member is typescript.MethodDeclaration =>
+      typescript.isMethodDeclaration(member) &&
+      typescript.isIdentifier(member.name) &&
+      member.name.text === methodName,
+  );
+  if (method === undefined) {
+    return [];
+  }
+  return Array.from(method.parameters).map((param) =>
+    typescript.isIdentifier(param.name) ? param.name.text : '',
+  );
+}
+
 function getClassMethodParams(
   member: typescript.MethodDeclaration,
 ): string[] {
@@ -271,6 +289,94 @@ function mergeMethodContracts(
     : base;
 }
 
+function extractBaseMethodContracts(
+  baseClassNode: typescript.ClassDeclaration,
+  methodName: string,
+  subclassParams: string[],
+  mode: ParamMismatchMode,
+  baseName: string,
+  location: string,
+  warn: (msg: string) => void,
+): InterfaceMethodContracts | undefined {
+  const baseMethod = Array.from(baseClassNode.members).find(
+    (member): member is typescript.MethodDeclaration =>
+      typescript.isMethodDeclaration(member) &&
+      typescript.isIdentifier(member.name) &&
+      member.name.text === methodName,
+  );
+  if (baseMethod === undefined) {
+    return undefined;
+  }
+
+  const baseParams = findBaseClassMethodParams(baseClassNode, methodName);
+  if (baseParams.length !== subclassParams.length) {
+    warn(
+      `[axiom] Parameter count mismatch in ${location}:`
+      + `\n  base class ${baseName} has ${baseParams.length} parameters,`
+      + ` subclass has ${subclassParams.length} — base class contracts skipped`,
+    );
+    return { preTags: [], postTags: [], sourceInterface: baseName };
+  }
+
+  const { renameMap, shouldSkip } = handleParamMismatch(
+    baseName, location, baseParams, subclassParams, mode, warn,
+  );
+  if (shouldSkip) {
+    return { preTags: [], postTags: [], sourceInterface: baseName };
+  }
+
+  const hasMismatch = renameMap.size > 0;
+  const allTags = extractContractTagsFromNode(baseMethod);
+  const preTags = allTags.filter((tag) => tag.kind === KIND_PRE);
+  const postTags = allTags.filter((tag) => tag.kind === KIND_POST);
+
+  let prevExpr = extractPrevExpression(baseMethod);
+  if (hasMismatch && mode === MODE_RENAME && prevExpr !== undefined) {
+    prevExpr = renameIdentifiersInExpression(prevExpr, renameMap);
+  }
+
+  return buildContractsResult(
+    preTags, postTags, prevExpr, renameMap, hasMismatch, mode, baseName,
+  );
+}
+
+function processBaseClassDeclaration(
+  decl: typescript.ClassDeclaration,
+  classNode: typescript.ClassDeclaration,
+  cache: Map<string, typescript.SourceFile>,
+  warn: (msg: string) => void,
+  mode: ParamMismatchMode,
+  className: string,
+  result: BaseClassContracts,
+): void {
+  const baseName = decl.name?.text ?? 'UnknownBase';
+  const reparsed = reparseCached(decl.getSourceFile(), cache);
+  const reparsedBase = findClassByPos(reparsed, decl.pos);
+  if (reparsedBase !== undefined) {
+    const baseInvariants = extractInvariantExpressions(reparsedBase);
+    result.invariants.push(...baseInvariants);
+
+    classNode.members.forEach((member) => {
+      const isMethod = typescript.isMethodDeclaration(member);
+      const hasIdentifierName = isMethod && typescript.isIdentifier(member.name);
+      if (isMethod && hasIdentifierName) {
+        const methodName = member.name.text;
+        const subclassParams = getClassMethodParams(member);
+        const location = `${className}.${methodName}`;
+        const methodContracts = extractBaseMethodContracts(
+          reparsedBase, methodName, subclassParams, mode, baseName, location, warn,
+        );
+        if (methodContracts !== undefined) {
+          result.methods.set(
+            methodName,
+            mergeMethodContracts(result.methods.get(methodName), methodContracts),
+          );
+        }
+      }
+    });
+  }
+}
+
 function processInterfaceDeclaration(
   decl: typescript.InterfaceDeclaration,
   classNode: typescript.ClassDeclaration,
@@ -360,18 +466,36 @@ export function resolveInterfaceContracts(
 }
 
 export function resolveBaseClassContracts(
-  _classNode: typescript.ClassDeclaration,
-  _checker: typescript.TypeChecker,
-  _cache: Map<string, typescript.SourceFile>,
-  _warn: (msg: string) => void,
-  _mode: ParamMismatchMode,
+  classNode: typescript.ClassDeclaration,
+  checker: typescript.TypeChecker,
+  cache: Map<string, typescript.SourceFile>,
+  warn: (msg: string) => void,
+  mode: ParamMismatchMode,
 ): BaseClassContracts {
   const result: BaseClassContracts = {
-    methods: new Map<string, InterfaceMethodContracts>(),
+    methods: new Map(),
     invariants: [],
   };
-  // findClassByPos will be used in Task 2 when resolving extends clause
-  const sourceFile = _classNode.getSourceFile();
-  findClassByPos(sourceFile, -1);
+  const className = classNode.name?.text ?? 'UnknownClass';
+
+  const heritageClauses = classNode.heritageClauses ?? [];
+  heritageClauses.forEach((clause) => {
+    if (clause.token === typescript.SyntaxKind.ExtendsKeyword) {
+      clause.types.forEach((typeRef) => {
+        const baseType = checker.getTypeAtLocation(typeRef.expression);
+        const declarations = baseType.symbol?.declarations;
+        if (declarations !== undefined) {
+          declarations.forEach((decl) => {
+            if (typescript.isClassDeclaration(decl)) {
+              processBaseClassDeclaration(
+                decl, classNode, cache, warn, mode, className, result,
+              );
+            }
+          });
+        }
+      });
+    }
+  });
+
   return result;
 }
