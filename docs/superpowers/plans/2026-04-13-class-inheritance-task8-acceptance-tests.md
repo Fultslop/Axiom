@@ -1,6 +1,6 @@
 # Class Inheritance — Task 8: Acceptance tests — runtime contract enforcement
 
-State: not started
+State: completed
 
 > **Sequence:** This is step 8 of 8. Tasks 4, 5, 6, and 7 must be complete before starting this task.
 > **For agentic workers:** Use `superpowers:executing-plans` to implement this task.

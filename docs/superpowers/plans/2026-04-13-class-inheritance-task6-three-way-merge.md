@@ -1,6 +1,6 @@
 # Class Inheritance — Task 6: Three-way merge warning and merge ordering
 
-State: not started
+State: completed
 
 > **Sequence:** This is step 6 of 8. Task 5 must be complete before starting this task.
 > **For agentic workers:** Use `superpowers:executing-plans` to implement this task.
@@ -92,8 +92,9 @@ describe('three-way contract merge (interface + base + subclass)', () => {
         feed(amount: number): void { this.energy += amount; }
       }
     `;
-    const { Dog } = evalTransformed(transformWithProgram(source, () => {}));
-    const dog = new Dog();
+    const js = transformWithProgram(source, () => {});
+    const DogClass = evalTransformedWith(js, 'Dog') as new () => { feed: (n: number) => void };
+    const dog = new DogClass();
     expect(() => dog.feed(0)).toThrow();      // violates interface pre
     expect(() => dog.feed(-200)).toThrow();   // violates base pre
     expect(() => dog.feed(2000)).toThrow();   // violates subclass pre

@@ -105,7 +105,7 @@ function mergeContractSets(
 ): InterfaceContracts {
   const merged: InterfaceContracts = {
     methods: new Map(primary.methods),
-    invariants: [...primary.invariants, ...secondary.invariants],
+    invariants: primary.invariants,
   };
   secondary.methods.forEach((contracts, methodName) => {
     const existing = merged.methods.get(methodName);
@@ -320,24 +320,43 @@ function rewriteMember(
   return { element: member, changed: false };
 }
 
+function getBaseClassName(node: typescript.ClassDeclaration): string {
+  const extendsClause = node.heritageClauses?.find(
+    (hc) => hc.token === typescript.SyntaxKind.ExtendsKeyword,
+  );
+  const expr = extendsClause?.types[0]?.expression;
+  return expr !== undefined && typescript.isIdentifier(expr) ? expr.text : 'base class';
+}
+
 function resolveEffectiveInvariants(
   node: typescript.ClassDeclaration,
   reparsedClass: typescript.ClassDeclaration | typescript.Node,
   className: string,
   warn: (msg: string) => void,
   interfaceInvariants: string[],
+  baseClassInvariants: string[] = [],
+  baseClassName: string = 'base class',
 ): string[] {
   const classRaw = extractInvariantExpressions(reparsedClass);
-
-  if (interfaceInvariants.length > 0 && classRaw.length > 0) {
+  const sources: string[] = [];
+  if (interfaceInvariants.length > 0) {
+    sources.push('interface');
+  }
+  if (baseClassInvariants.length > 0) {
+    sources.push(baseClassName);
+  }
+  if (classRaw.length > 0) {
+    sources.push(className);
+  }
+  if (sources.length > 1) {
     warn(
       `[axiom] Contract merge warning in ${className}:`
-      + '\n  both interface and class define @invariant tags'
+      + `\n  ${sources.join(', ')} all define @invariant tags`
       + ' — additive merge applied',
     );
   }
 
-  const allRaw = [...interfaceInvariants, ...classRaw];
+  const allRaw = [...interfaceInvariants, ...baseClassInvariants, ...classRaw];
   const valid = filterValidInvariants(allRaw, className, warn);
 
   if (valid.length > 0 && hasClashingMember(node)) {
@@ -410,7 +429,8 @@ function resolveClassContracts(
   const interfaceContracts = mergeContractSets(ifaceOnly, baseContracts);
   const reparsedClass = ctx.reparsedIndex.classes.get(node.pos) ?? node;
   const effectiveInvariants = resolveEffectiveInvariants(
-    node, reparsedClass, className, warn, interfaceContracts.invariants,
+    node, reparsedClass, className, warn,
+    ifaceOnly.invariants, baseContracts.invariants, getBaseClassName(node),
   );
   return { interfaceContracts, effectiveInvariants };
 }

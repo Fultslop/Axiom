@@ -1,6 +1,6 @@
 # Class Inheritance — Task 7: `transpileModule` mode warning covers `extends` clause
 
-State: not started
+State: completed
 
 > **Sequence:** This is step 7 of 8. Task 4 must be complete before starting this task.
 > **For agentic workers:** Use `superpowers:executing-plans` to implement this task.
@@ -58,7 +58,7 @@ describe('transpileModule mode with extends clause', () => {
       }
     `;
     const warnings: string[] = [];
-    transformWithoutProgram(source, (msg) => warnings.push(msg));
+    transform(source, (msg) => warnings.push(msg));
     expect(
       warnings.some(
         (w) =>
@@ -77,8 +77,9 @@ describe('transpileModule mode with extends clause', () => {
         feed(amount: number): void { this.energy += amount; }
       }
     `;
-    const { Dog } = evalTransformed(transformWithoutProgram(source, () => {}));
-    const dog = new Dog();
+    const js = transform(source, () => {});
+    const DogClass = evalTransformedWith(js, 'Dog') as new () => { feed: (n: number) => void };
+    const dog = new DogClass();
     expect(() => dog.feed(-1)).toThrow();
     expect(() => dog.feed(5)).not.toThrow();
   });

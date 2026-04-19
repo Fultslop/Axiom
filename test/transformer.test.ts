@@ -628,6 +628,103 @@ describe('base class contract inheritance', () => {
   });
 });
 
+describe('base class invariant inheritance', () => {
+  it('subclass inherits @invariant from base class', () => {
+    const source = `
+      /** @invariant this.energy >= 0 */
+      class Animal {
+        energy = 0;
+        feed(amount: number): void { this.energy += amount; }
+      }
+      export class Dog extends Animal {
+        energy = 0;
+        feed(amount: number): void { this.energy = -99; }
+      }
+    `;
+    const js = transformWithProgram(source, () => {});
+    const DogClass = evalTransformedWith(js, 'Dog') as new () => { feed: (n: number) => void };
+    const dog = new DogClass();
+    expect(() => dog.feed(5)).toThrow();
+  });
+
+  it('emits named merge warning when base and subclass both define @invariant', () => {
+    const source = `
+      /** @invariant this.energy >= 0 */
+      class Animal {
+        energy = 0;
+        feed(amount: number): void {}
+      }
+      /** @invariant this.energy < 1000 */
+      export class Dog extends Animal {
+        energy = 0;
+        feed(amount: number): void {}
+      }
+    `;
+    const warnings: string[] = [];
+    transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(
+      warnings.some(
+        (w) => w.includes('Animal') && w.includes('Dog') && w.includes('invariant'),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe('three-way contract merge (interface + base + subclass)', () => {
+  it('emits merge warning listing all three sources', () => {
+    const source = `
+      interface IAnimal {
+        /** @pre amount !== 0 */
+        feed(amount: number): void;
+      }
+      class Animal implements IAnimal {
+        /** @pre amount > 0 */
+        feed(amount: number): void {}
+      }
+      export class Dog extends Animal implements IAnimal {
+        /** @pre amount < 1000 */
+        feed(amount: number): void {}
+      }
+    `;
+    const warnings: string[] = [];
+    transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(
+      warnings.some(
+        (w) =>
+          w.includes('IAnimal') &&
+          w.includes('Animal') &&
+          w.includes('Dog') &&
+          w.includes('@pre'),
+      ),
+    ).toBe(true);
+  });
+
+  it('applies all three @pre guards in order (interface → base → subclass)', () => {
+    const source = `
+      interface IAnimal {
+        /** @pre amount !== 0 */
+        feed(amount: number): void;
+      }
+      class Animal implements IAnimal {
+        /** @pre amount > -100 */
+        feed(amount: number): void {}
+      }
+      export class Dog extends Animal implements IAnimal {
+        energy = 0;
+        /** @pre amount < 1000 */
+        feed(amount: number): void { this.energy += amount; }
+      }
+    `;
+    const js = transformWithProgram(source, () => {});
+    const DogClass = evalTransformedWith(js, 'Dog') as new () => { feed: (n: number) => void };
+    const dog = new DogClass();
+    expect(() => dog.feed(0)).toThrow();      // violates interface pre
+    expect(() => dog.feed(-200)).toThrow();   // violates base pre
+    expect(() => dog.feed(2000)).toThrow();   // violates subclass pre
+    expect(() => dog.feed(5)).not.toThrow();
+  });
+});
+
 describe('buildCapturedIdentifiers — outer param and preceding const in known set', () => {
   it('does not warn when @pre references outer parameter by name', () => {
     const source = `
@@ -943,5 +1040,44 @@ describe('multiple nested functions in the same outer function body', () => {
     expect(output).toContain('x > 0');
     expect(output).toContain('outer > arrow');
     expect(output).toContain('y > 0');
+  });
+});
+
+describe('transpileModule mode with extends clause', () => {
+  it('emits warning when class has extends clause and no TypeChecker', () => {
+    const source = `
+      class Animal {
+        /** @pre amount > 0 */
+        feed(amount: number): void {}
+      }
+      export class Dog extends Animal {
+        feed(amount: number): void {}
+      }
+    `;
+    const warnings: string[] = [];
+    transform(source, (msg) => warnings.push(msg));
+    expect(
+      warnings.some(
+        (w) =>
+          w.includes('transpileModule') &&
+          w.includes('class-level contracts unaffected'),
+      ),
+    ).toBe(true);
+  });
+
+  it('class-own contracts still fire in transpileModule mode', () => {
+    const source = `
+      class Animal {}
+      export class Dog extends Animal {
+        energy = 0;
+        /** @pre amount > 0 */
+        feed(amount: number): void { this.energy += amount; }
+      }
+    `;
+    const js = transform(source, () => {});
+    const DogClass = evalTransformedWith(js, 'Dog') as new () => { feed: (n: number) => void };
+    const dog = new DogClass();
+    expect(() => dog.feed(-1)).toThrow();
+    expect(() => dog.feed(5)).not.toThrow();
   });
 });

@@ -1,6 +1,6 @@
 # Class Inheritance — Task 5: Invariant inheritance and updated `resolveEffectiveInvariants`
 
-State: not started
+State: completed
 
 > **Sequence:** This is step 5 of 8. Task 4 must be complete before starting this task.
 > **For agentic workers:** Use `superpowers:executing-plans` to implement this task.
@@ -53,9 +53,9 @@ Add to `test/transformer.test.ts`:
 describe('base class invariant inheritance', () => {
   it('subclass inherits @invariant from base class', () => {
     const source = `
+      /** @invariant this.energy >= 0 */
       class Animal {
         energy = 0;
-        /** @invariant this.energy >= 0 */
         feed(amount: number): void { this.energy += amount; }
       }
       export class Dog extends Animal {
@@ -63,21 +63,22 @@ describe('base class invariant inheritance', () => {
         feed(amount: number): void { this.energy = -99; }
       }
     `;
-    const { Dog } = evalTransformed(transformWithProgram(source, () => {}));
-    const dog = new Dog();
+    const js = transformWithProgram(source, () => {});
+    const DogClass = evalTransformedWith(js, 'Dog') as new () => { feed: (n: number) => void };
+    const dog = new DogClass();
     expect(() => dog.feed(5)).toThrow();
   });
 
   it('emits named merge warning when base and subclass both define @invariant', () => {
     const source = `
+      /** @invariant this.energy >= 0 */
       class Animal {
         energy = 0;
-        /** @invariant this.energy >= 0 */
         feed(amount: number): void {}
       }
+      /** @invariant this.energy < 1000 */
       export class Dog extends Animal {
         energy = 0;
-        /** @invariant this.energy < 1000 */
         feed(amount: number): void {}
       }
     `;
