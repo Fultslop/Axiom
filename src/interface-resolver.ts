@@ -175,7 +175,8 @@ function findMethodSignature(
 }
 
 function handleParamMismatch(
-  ifaceName: string,
+  sourceName: string,
+  sourceLabel: string,
   location: string,
   ifaceParams: string[],
   classParams: string[],
@@ -192,7 +193,7 @@ function handleParamMismatch(
   const action = mode === MODE_RENAME ? ACTION_RENAMED : ACTION_SKIPPED;
   warn(
     `[axiom] Parameter name mismatch in ${location}:`
-    + `\n  interface ${ifaceName}: ${pairs} — ${action}`,
+    + `\n  ${sourceLabel} ${sourceName}: ${pairs} — ${action}`,
   );
   if (mode === MODE_IGNORE) {
     return { renameMap, shouldSkip: true };
@@ -250,7 +251,7 @@ function extractMethodContracts(
   }
 
   const { renameMap, shouldSkip } = handleParamMismatch(
-    ifaceName, location, ifaceParams, classParams, mode, warn,
+    ifaceName, 'interface', location, ifaceParams, classParams, mode, warn,
   );
   if (shouldSkip) {
     return { preTags: [], postTags: [], sourceInterface: ifaceName };
@@ -319,7 +320,7 @@ function extractBaseMethodContracts(
   }
 
   const { renameMap, shouldSkip } = handleParamMismatch(
-    baseName, location, baseParams, subclassParams, mode, warn,
+    baseName, 'base class', location, baseParams, subclassParams, mode, warn,
   );
   if (shouldSkip) {
     return { preTags: [], postTags: [], sourceInterface: baseName };

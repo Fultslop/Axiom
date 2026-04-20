@@ -322,7 +322,7 @@ function rewriteMember(
 
 function getBaseClassName(node: typescript.ClassDeclaration): string {
   const extendsClause = node.heritageClauses?.find(
-    (hc) => hc.token === typescript.SyntaxKind.ExtendsKeyword,
+    (clause) => clause.token === typescript.SyntaxKind.ExtendsKeyword,
   );
   const expr = extendsClause?.types[0]?.expression;
   return expr !== undefined && typescript.isIdentifier(expr) ? expr.text : 'base class';

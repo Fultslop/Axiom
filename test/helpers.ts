@@ -62,7 +62,7 @@ export function transformWithProgram(
     options.warn = warn;
   }
   if (mismatchMode !== undefined) {
-    options.interfaceParamMismatch = mismatchMode;
+    options.paramMismatch = mismatchMode;
   }
   const transformerOptions = Object.keys(options).length > 0 ? options : undefined;
   let output = '';

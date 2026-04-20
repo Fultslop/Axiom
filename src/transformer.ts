@@ -380,6 +380,9 @@ function transformSourceFile(
 
 export type TransformerOptions = {
   warn?: (msg: string) => void;
+  /** Controls how parameter name mismatches are handled for both interface and base-class contracts. */
+  paramMismatch?: 'rename' | 'ignore';
+  /** @deprecated Use `paramMismatch` instead. */
   interfaceParamMismatch?: 'rename' | 'ignore';
   allowIdentifiers?: string[];
   keepContracts?: boolean | 'pre' | 'post' | 'invariant' | 'all';
@@ -398,7 +401,7 @@ function resolveTransformerOptions(
   const warn = options?.warn ?? ((msg: string): void => {
     process.stderr.write(`${msg}\n`);
   });
-  const rawMode = options?.interfaceParamMismatch;
+  const rawMode = options?.paramMismatch ?? options?.interfaceParamMismatch;
   const paramMismatch: ParamMismatchMode = rawMode === MODE_IGNORE ? 'ignore' : 'rename';
   const allowIdentifiers = options?.allowIdentifiers ?? [];
   const keepContracts = resolveKeepContracts(options?.keepContracts);
