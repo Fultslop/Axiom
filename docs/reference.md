@@ -178,6 +178,88 @@ This lets a monorepo or multi-module library opt individual files in without cha
 
 ---
 
+## Constructor contracts
+
+`@pre` and `@post` tags on a constructor are supported. Pre-conditions are checked at the entry of the constructor body. Post-conditions are checked after user code completes, before invariant checks run.
+
+```typescript
+class Account {
+  balance: number;
+
+  /**
+   * @pre initialBalance >= 0
+   * @post this.balance === initialBalance
+   */
+  constructor(initialBalance: number) {
+    this.balance = initialBalance;
+  }
+}
+```
+
+### Restrictions
+
+`result` and `prev` cannot be used in constructor `@post` expressions — a constructor has no return value and no meaningful pre-construction snapshot. Both are dropped with a warning:
+
+```
+[axiom] Warning: @post on constructor of Account references 'result' — constructors have no return value; tag dropped
+[axiom] Warning: @post on constructor of Account references 'prev' — @prev is not supported on constructors; tag dropped
+```
+
+`@prev` tags on constructors are similarly not supported.
+
+**`@pre` expressions referencing `this` in derived classes** — when a subclass constructor calls `super()`, `this` is not accessible until after the `super()` call. A `@pre` expression that reads `this` in a derived class constructor will throw a `ReferenceError` at runtime. Axiom does not currently detect or warn about this pattern; it is the author's responsibility to avoid `this` references in derived class constructor pre-conditions.
+
+The location string in error messages uses the class name only (`Account`), not `Account.constructor`.
+
+---
+
+## Class inheritance contracts
+
+When a class extends a base class, contracts defined on the base class methods and invariants are automatically inherited by the subclass. You do not need to repeat the contracts on the overriding method.
+
+```typescript
+class Animal {
+  /**
+   * @pre name.length > 0
+   * @post result.length > 0
+   */
+  describe(name: string): string {
+    return `Animal: ${name}`;
+  }
+}
+
+class Dog extends Animal {
+  // @pre and @post from Animal.describe are injected here automatically.
+  describe(name: string): string {
+    return `Dog: ${name}`;
+  }
+}
+```
+
+### Merge order
+
+When a class both inherits from a base class and implements an interface, contracts are merged additively in this order: interface contracts → base class contracts → subclass contracts. All sets are applied; a merge warning is emitted when multiple sources define contracts for the same method.
+
+### Parameter name mismatches
+
+The same rename/ignore mechanism used for interface parameter mismatches applies here. If the overriding method uses different parameter names, identifiers in the inherited expression are renamed to match, and a warning is emitted. Pass `interfaceParamMismatch: 'ignore'` to skip the contract instead.
+
+### Requires full program mode
+
+Class inheritance resolution requires the TypeScript type checker (full program mode). In `transpileModule` mode the inherited contracts are silently skipped and a warning is emitted to stderr:
+
+```
+[axiom] Base class contract resolution skipped in Dog:
+  no TypeChecker available (transpileModule mode) — class-level contracts unaffected
+```
+
+### What is not inherited
+
+- Constructor contracts from a base class are **not** inherited by subclasses.
+- Only the **direct** parent class is resolved. Grandparent and more distant ancestor contracts are not inherited.
+
+---
+
 ## Nested function contracts
 
 `@pre` and `@post` tags on a named inner function or a `const`-assigned arrow inside an exported function or public class method are injected automatically — no extra configuration required.
@@ -274,16 +356,22 @@ export function outer(): void {
 - Zero contract overhead in release builds — plain `tsc` ignores JSDoc entirely
 - `keepContracts` option — opt-in baking of contracts into release builds for library authors; supports granular selection by kind (`'pre'`, `'post'`, `'invariant'`, `'all'`) and a file-level `// @axiom keepContracts` directive
 - `@pre` and `@post` on `async` functions and async class methods — post-conditions check the **resolved** value (`T`), not the `Promise<T>` object; `result` refers to the awaited value; `@post` on `async` functions returning `Promise<void>` is dropped with a warning (no meaningful `result`)
-- `@pre` and `@post` on exported `const` arrow functions and function expressions — expression-body arrows are normalised to block bodies automatically; the location string uses the variable name; JSDoc must precede the `const` keyword
+- `@pre` and `@post` on exported `const` arrow functions and function expressions, including `async` arrows — expression-body arrows are normalised to block bodies automatically; `async` arrows await the IIFE result identically to `async function` declarations; the location string uses the variable name; JSDoc must precede the `const` keyword
 - `@pre` and `@post` on named inner `FunctionDeclaration` and `const`-assigned arrow/function expressions nested one level deep inside an exported function or public class method — location string uses `outerName > innerName` or `ClassName.methodName > innerName` format; multiple tagged nested functions at the same depth are all rewritten
-- Misuse detection — `@pre`/`@post` on constructors, non-exported initialisers, grandchild functions (nested more than one level deep), IIFEs, and class declarations all emit targeted `[axiom] Warning:` diagnostics; `@invariant` on non-class nodes is similarly reported
+- `@pre` and `@post` on constructors — pre-conditions checked at constructor entry; post-conditions checked after user code and before invariant checks; `result` and `prev` are not valid in constructor `@post` and are dropped with a warning; `@prev` is not supported on constructors
+- `@pre` and `@post` on functions whose body contains `try/catch` — the body is wrapped in an IIFE that captures the return value from any branch; `@pre` guards run before the try block; `@post` checks the resolved value; `finally` blocks are preserved and execute normally
+- Method and `@invariant` contracts inherited from base classes via `extends` — base class contracts are merged additively with subclass and interface contracts (interface → base → subclass order); parameter name mismatches are handled via rename (default) or ignore mode; requires full TypeScript program (TypeChecker); only the direct parent class is resolved
+- Misuse detection — `@pre`/`@post` on non-exported initialisers, grandchild functions (nested more than one level deep), IIFEs, and class declarations all emit targeted `[axiom] Warning:` diagnostics; `@invariant` on non-class nodes is similarly reported
 
 ---
 
 ## Not yet in scope
 
 - Generators (`function*`) and async generators (`async function*`) — `yield` semantics make a single `result` post-condition ambiguous; deferred to a future spec
-- Inherited contracts from base classes (interface contracts are supported; class-to-class inheritance is not)
+- Multi-level (transitive) class inheritance — only the direct parent class is resolved; grandparent and more distant ancestor contracts are not inherited
+- Constructor contracts inherited from base classes — `@pre`/`@post` on a base class constructor are not propagated to subclass constructors
+- Liskov-aware contract merging — precondition weakening and postcondition strengthening are not enforced; only additive merge is performed; heuristic LSP violation detection is deferred to v2.0
+- `@pre` expressions referencing `this` in derived class constructors — Axiom does not detect or warn when a pre-condition in a subclass constructor reads `this` before `super()` is called
 - Integration with `ts-patch` via the `type: raw` loader under TypeScript 6 + `moduleResolution: node16` (a known ts-node 10.x incompatibility; tests use `ts.transpileModule` directly as the canonical verification path)
 
 ## Outside scope
@@ -311,22 +399,7 @@ export function foo(val: number | string): void { … }
 export function activate(status: Status): void { … }
 ```
 
-**3. `result` used without a return type annotation** — if a `@post` expression references `result` but the function has no declared return type (or is declared `void`/`never`), the `@post` is dropped with a warning. This applies in all compilation modes — no TypeChecker is required. For `async` functions, `Promise<void>` is treated as `void` by the same rule.
-```typescript
-/** @post result === "foo" */
-// warns: 'result' used but no return type is declared; @post dropped
-export function noAnnotation(x: number) { return x; }
-
-/** @post result === "foo" */
-// warns: 'result' used but return type is 'void'; @post dropped
-export function voidFn(x: number): void { }
-
-/** @post result !== null */
-// warns: 'result' used but return type is 'void'; @post dropped
-export async function asyncVoid(x: number): Promise<void> { }
-```
-
-**4. Narrowing in `&&` chains is limited to `typeof` guards** — `typeof x === 'string'` guards in `&&` chains are recognised and applied to subsequent clauses, enabling type-mismatch detection for ambiguous union parameters. Other narrowing patterns — null checks, truthiness, `instanceof`, `||` chains — are not recognised.
+**3. Narrowing in `&&` chains is limited to `typeof` guards** — `typeof x === 'string'` guards in `&&` chains are recognised and applied to subsequent clauses, enabling type-mismatch detection for ambiguous union parameters. Other narrowing patterns — null checks, truthiness, `instanceof`, `||` chains — are not recognised.
 ```typescript
 // Works — typeof guard applied:
 /** @pre typeof x === "string" && x === 42 */  // warns: x narrowed to string, 42 is number literal
@@ -337,29 +410,20 @@ export function foo(x: string | number): void { … }
 export function foo(x: string | number): void { … }
 ```
 
-**5. Async arrow functions are not instrumented** — `async` and arrow function support do not compose. An `async` arrow function assigned to an exported `const` is silently skipped — no injection, no warning. Use an `async function` declaration instead.
-```typescript
-// NOT supported — contracts silently skipped
-export const fetch = /** @pre id > 0 */ async (id: number): Promise<User> => db.query(id);
+**4. `@pre` expressions on derived class constructors that reference `this`** — `this` is not accessible in a subclass constructor before `super()` completes. A `@pre` condition that reads `this` will throw a `ReferenceError` at runtime. Axiom does not detect this pattern; avoid `this` references in derived class constructor pre-conditions.
 
-// Supported — use a function declaration
-/** @pre id > 0 */
-export async function fetch(id: number): Promise<User> { return db.query(id); }
+**5. Unsupported expression constructs drop only the affected tag** — the contract reifier handles a defined set of expression node kinds. When a contract expression contains an unsupported construct — an array literal, an arrow function, or a `void` expression — that specific tag is dropped with a targeted warning. Other contracts on the same function are unaffected. The warning format is:
 ```
-
-**6. Unsupported expression constructs drop all contracts with an internal error warning** — the contract reifier handles a defined set of expression and statement node kinds. When a contract expression contains an unsupported construct (e.g. an array literal, an arrow function, or a `void` expression), or when the function body contains a `try/catch` block, the reifier cannot process the function and emits an `[axiom] Internal error` warning. All contracts on that function are dropped — no pre/post injection occurs.
+[axiom] Warning: @post result === [1, 2, 3] — array literal — use a property check such as result.length === N instead (in getItems); tag dropped
+```
 ```typescript
-// Internal error — array literal not supported in contract expressions
+// @post tag dropped — array literal in contract expression
 /** @post result === [1, 2, 3] */
+// warns: array literal — use a property check such as result.length === N instead
 export function getItems(): number[] { … }
 
-// Internal error — arrow function not supported in contract expressions
+// @post tag dropped — arrow function in contract expression
 /** @post result === items.map(x => x * 2) */
+// warns: function expression — contract expressions must be pure predicates, not callbacks
 export function doubled(items: number[]): number[] { … }
-
-// Internal error — try/catch body prevents reification
-/** @pre amount > 0 */
-export function parse(amount: number): number {
-  try { return JSON.parse(String(amount)); } catch { return 0; }
-}
 ```

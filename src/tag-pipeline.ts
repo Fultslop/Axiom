@@ -3,6 +3,7 @@ import type { ContractTag } from './jsdoc-parser';
 import { extractContractTags, extractPrevExpression } from './jsdoc-parser';
 import { validateExpression } from './contract-validator';
 import { parseContractExpression } from './ast-builder';
+import { findUnsupportedExpressionNode } from './reifier';
 import type { InterfaceMethodContracts } from './interface-resolver';
 import type { TypeMapValue } from './type-helpers';
 import {
@@ -178,8 +179,17 @@ export function filterValidTags(
   contextNode?: typescript.FunctionLikeDeclaration,
 ): ContractTag[] {
   return tags.filter((tag) => {
+    const parsed = parseContractExpression(tag.expression);
+    const unsupported = findUnsupportedExpressionNode(parsed);
+    if (unsupported !== undefined) {
+      warn(
+        `[axiom] Warning: @${kind} ${tag.expression} — ${unsupported}`
+        + ` (in ${location}); tag dropped`,
+      );
+      return false;
+    }
     const errors = validateExpression(
-      parseContractExpression(tag.expression),
+      parsed,
       tag.expression,
       location,
       knownIdentifiers,

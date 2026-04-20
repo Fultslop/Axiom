@@ -1081,3 +1081,144 @@ describe('transpileModule mode with extends clause', () => {
     expect(() => dog.feed(5)).not.toThrow();
   });
 });
+
+describe('@pre on function with try/catch body', () => {
+  it('injects @pre guard before the try block', () => {
+    const source = `
+      /** @pre amount > 0 */
+      export function parse(amount: number): number {
+        try { return JSON.parse(String(amount)); } catch { return 0; }
+      }
+    `;
+    const warnings: string[] = [];
+    const js = transform(source, (msg) => warnings.push(msg));
+    expect(warnings).toEqual([]);
+    const fn = evalTransformedWith(js, 'parse') as (n: number) => number;
+    expect(() => fn(-1)).toThrow('PRE');
+    expect(fn(1)).toBe(1);
+  });
+});
+
+describe('@post on function with try/catch body', () => {
+  it('injects @post check after the try/catch IIFE', () => {
+    const source = `
+      /**
+       * @pre input.length > 0
+       * @post result >= 0
+       */
+      export function parse(input: string): number {
+        try { return JSON.parse(input); } catch { return -1; }
+      }
+    `;
+    const warnings: string[] = [];
+    const js = transform(source, (msg) => warnings.push(msg));
+    expect(warnings).toEqual([]);
+    const fn = evalTransformedWith(js, 'parse') as (s: string) => number;
+    expect(() => fn('')).toThrow('PRE');
+    expect(() => fn('invalid')).toThrow('POST'); // catch returns -1, violates result >= 0
+    expect(fn('42')).toBe(42);
+  });
+});
+
+describe('@pre on function with try/catch/finally body', () => {
+  it('injects @pre and preserves finally execution', () => {
+    const source = `
+      /** @pre x > 0 */
+      export function withFinally(x: number): number {
+        try { return x * 2; } catch { return 0; } finally { /* cleanup */ }
+      }
+    `;
+    const warnings: string[] = [];
+    const js = transform(source, (msg) => warnings.push(msg));
+    expect(warnings).toEqual([]);
+    const fn = evalTransformedWith(js, 'withFinally') as (n: number) => number;
+    expect(() => fn(0)).toThrow('PRE');
+    expect(fn(3)).toBe(6);
+  });
+});
+
+describe('@pre on function with try/catch only (no catch binding)', () => {
+  it('handles catch clause with no variable binding', () => {
+    const source = `
+      /** @pre s.length > 0 */
+      export function parseJson(s: string): unknown {
+        try { return JSON.parse(s); } catch { return null; }
+      }
+    `;
+    const warnings: string[] = [];
+    const js = transform(source, (msg) => warnings.push(msg));
+    expect(warnings).toEqual([]);
+    const fn = evalTransformedWith(js, 'parseJson') as (s: string) => unknown;
+    expect(() => fn('')).toThrow('PRE');
+    expect(fn('{"a":1}')).toEqual({ a: 1 });
+  });
+});
+
+
+describe('async arrow function with @pre (expression body)', () => {
+  it('injects @pre guard into async expression-body arrow', async () => {
+    const source = `
+      /** @pre id > 0 */
+      export const fetchUser = async (id: number): Promise<string> => 'user-' + id;
+    `;
+    const warnings: string[] = [];
+    const js = transform(source, (msg) => warnings.push(msg));
+    expect(warnings).toEqual([]);
+    const fn = evalTransformedWith(js, 'fetchUser') as (id: number) => Promise<string>;
+    await expect(fn(-1)).rejects.toThrow('PRE');
+    await expect(fn(1)).resolves.toBe('user-1');
+  });
+
+});
+
+
+describe('async arrow function with @pre (block body)', () => {
+  it('injects @pre guard into async block-body arrow', async () => {
+    const source = `
+      /** @pre id > 0 */
+      export const fetchUser = async (id: number): Promise<string> => {
+        return 'user-' + id;
+      };
+    `;
+    const warnings: string[] = [];
+    const js = transform(source, (msg) => warnings.push(msg));
+    expect(warnings).toEqual([]);
+    const fn = evalTransformedWith(js, 'fetchUser') as (id: number) => Promise<string>;
+    await expect(fn(0)).rejects.toThrow('PRE');
+    await expect(fn(5)).resolves.toBe('user-5');
+  });
+});
+
+describe('async arrow function with @post result', () => {
+  it('checks resolved value, not Promise object', async () => {
+    const source = `
+      /**
+       * @pre id > 0
+       * @post result !== null
+       */
+      export const findUser = async (id: number): Promise<string | null> =>
+        id === 99 ? null : 'user-' + id;
+    `;
+    const warnings: string[] = [];
+    const js = transform(source, (msg) => warnings.push(msg));
+    expect(warnings).toEqual([]);
+    const fn = evalTransformedWith(js, 'findUser') as (id: number) => Promise<string | null>;
+    await expect(fn(0)).rejects.toThrow('PRE');
+    await expect(fn(99)).rejects.toThrow('POST');
+    await expect(fn(1)).resolves.toBe('user-1');
+  });
+});
+
+describe('async arrow returning Promise<void> — @post dropped with warning', () => {
+  it('drops @post and emits a warning', async () => {
+    const source = `
+      /** @post result !== null */
+      export const logUser = async (id: number): Promise<void> => { /* noop */ };
+    `;
+    const warnings: string[] = [];
+    const js = transform(source, (msg) => warnings.push(msg));
+    expect(warnings.some((w) => w.includes('void') && w.includes('@post'))).toBe(true);
+    const fn = evalTransformedWith(js, 'logUser') as (id: number) => Promise<void>;
+    await expect(fn(1)).resolves.toBeUndefined();
+  });
+});
