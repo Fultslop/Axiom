@@ -1,9 +1,12 @@
 import typescript from 'typescript';
 import {
   resolveInterfaceContracts,
+  resolveBaseClassContracts,
   type ParamMismatchMode,
   type InterfaceContracts,
+  type BaseClassContracts,
 } from '@src/interface-resolver';
+import { transformWithProgram } from './helpers';
 
 // Helper: build a single-file Program with TypeChecker
 function buildProgram(fileName: string, source: string): typescript.Program {
@@ -340,5 +343,138 @@ describe('resolveInterfaceContracts — @prev inheritance', () => {
       classDecl, checker, cache, (msg) => warnings.push(msg), 'rename',
     );
     expect(contracts.methods.get('bar')!.prevExpression).toBe('this.balance');
+  });
+});
+
+function runBaseClassResolver(
+  program: typescript.Program,
+  fileName: string,
+  mode: ParamMismatchMode = 'rename',
+): { contracts: BaseClassContracts; warnings: string[] } {
+  const checker = program.getTypeChecker();
+  const classDecl = getClassDecl(program, fileName);
+  const cache = new Map<string, typescript.SourceFile>();
+  const warnings: string[] = [];
+  const contracts = resolveBaseClassContracts(
+    classDecl, checker, cache, (msg) => warnings.push(msg), mode,
+  );
+  return { contracts, warnings };
+}
+
+describe('resolveBaseClassContracts', () => {
+  it('returns empty result when class has no extends clause', () => {
+    const program = buildProgram('test.ts', `
+      class Animal {
+        /** @pre amount > 0 */
+        feed(amount: number): void {}
+      }
+    `);
+    const { contracts, warnings } = runBaseClassResolver(program, 'test.ts');
+    expect(contracts.methods.size).toBe(0);
+    expect(contracts.invariants).toHaveLength(0);
+    expect(warnings).toHaveLength(0);
+  });
+
+  it('returns empty result when base class has no contracts', () => {
+    const program = buildProgram('test.ts', `
+      class Animal {
+        feed(amount: number): void {}
+      }
+      class Dog extends Animal {
+        feed(amount: number): void {}
+      }
+    `);
+    const { contracts, warnings } = runBaseClassResolver(program, 'test.ts');
+    expect(contracts.methods.size).toBe(0);
+    expect(contracts.invariants).toHaveLength(0);
+    expect(warnings).toHaveLength(0);
+  });
+
+  it('returns @pre and @post from base class method when subclass overrides it', () => {
+    const source = `
+      class Animal {
+        /**
+         * @pre amount > 0
+         * @post this.energy > 0
+         */
+        feed(amount: number): void {}
+      }
+      class Dog extends Animal {
+        feed(amount: number): void {}
+      }
+    `;
+    const warnings: string[] = [];
+    const output = transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(output).toContain('amount > 0');
+    expect(output).toContain('this.energy > 0');
+  });
+
+  it('returns base class @invariant tags', () => {
+    const source = `
+      class Animal {
+        energy = 0;
+        /** @invariant this.energy >= 0 */
+      }
+      class Dog extends Animal {
+        energy = 0;
+      }
+    `;
+    const warnings: string[] = [];
+    const output = transformWithProgram(source, (msg) => warnings.push(msg));
+    expect(output).toContain('this.energy >= 0');
+  });
+
+  it('renames expressions when subclass uses different param names (rename mode)', () => {
+    const source = `
+      class Animal {
+        /** @pre amount > 0 */
+        feed(amount: number): void {}
+      }
+      class Dog extends Animal {
+        feed(qty: number): void {}
+      }
+    `;
+    const warnings: string[] = [];
+    const output = transformWithProgram(source, (msg) => warnings.push(msg));
+    const dogSection = output.slice(output.indexOf('class Dog'));
+    expect(dogSection).toContain('qty > 0');
+    expect(dogSection).not.toContain('amount > 0');
+    expect(warnings.some((w) => w.includes('mismatch') && w.includes('Dog.feed'))).toBe(true);
+  });
+
+  it('skips base class contracts when param names differ (ignore mode)', () => {
+    const source = `
+      class Animal {
+        /** @pre amount > 0 */
+        feed(amount: number): void {}
+      }
+      class Dog extends Animal {
+        feed(qty: number): void {}
+      }
+    `;
+    const warnings: string[] = [];
+    const output = transformWithProgram(source, (msg) => warnings.push(msg), 'ignore');
+    // Dog.feed should have no contract guard (empty body)
+    expect(output).toMatch(/class Dog[\s\S]*?feed\(qty\)\s*\{\s*\}/);
+    expect(warnings.some((w) => w.includes('skipped') && w.includes('Dog.feed'))).toBe(true);
+  });
+
+  it('skips all base class contracts for a method when param counts differ', () => {
+    const source = `
+      class Animal {
+        /** @pre amount > 0 */
+        feed(amount: number, unit: string): void {}
+      }
+      class Dog extends Animal {
+        feed(amount: number): void {}
+      }
+    `;
+    const warnings: string[] = [];
+    const output = transformWithProgram(source, (msg) => warnings.push(msg));
+    // Dog.feed should have no contract guard (empty body)
+    expect(output).toMatch(/class Dog[\s\S]*?feed\(amount\)\s*\{\s*\}/);
+    expect(
+      warnings.some((w) => w.includes('count mismatch') && w.includes('Dog.feed')),
+    ).toBe(true);
   });
 });

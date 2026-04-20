@@ -14,6 +14,6 @@ Each entry: priority, plan file, suggested git commit message.
 6. [done]`2026-04-13-arrow-functions.md` — `feat: support @pre/@post on exported arrow and function-expression constants`
 7. [done]`2026-04-13-async-functions.md` — `fix: await async function body before checking @post result`
 8. [done]`2026-04-13-closures.md` — `feat: support @pre/@post on nested and closure functions` *(depends on #6)*
-9. `2026-04-13-class-inheritance.md` — `feat: inherit @pre/@post contracts from base classes via extends`
+9. [2/8] `2026-04-13-class-inheritance.md` — `feat: inherit @pre/@post contracts from base classes via extends`
 10. <Todo> Revisit limitations see what we address next
 11. `future-liskov-aware-contracts.md` — `feat: heuristic LSP violation detection for subtype @pre constraints` *(depends on #9)*

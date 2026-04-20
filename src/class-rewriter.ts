@@ -24,8 +24,10 @@ import { buildParameterTypes } from './type-helpers';
 import type { ContractTag } from './jsdoc-parser';
 import {
   resolveInterfaceContracts,
+  resolveBaseClassContracts,
   type InterfaceContracts,
   type InterfaceMethodContracts,
+  type BaseClassContracts,
 } from './interface-resolver';
 import {
   KIND_PRE, KIND_POST, expressionUsesResult, expressionUsesPrev,
@@ -86,10 +88,43 @@ function filterValidInvariants(
   });
 }
 
-function hasImplementsClauses(node: typescript.ClassDeclaration): boolean {
-  return node.heritageClauses !== undefined && node.heritageClauses.some(
-    (clause) => clause.token === typescript.SyntaxKind.ImplementsKeyword,
+function hasResolvableHeritageClauses(node: typescript.ClassDeclaration): boolean {
+  if (node.heritageClauses === undefined) {
+    return false;
+  }
+  return node.heritageClauses.some(
+    (clause) =>
+      clause.token === typescript.SyntaxKind.ImplementsKeyword ||
+      clause.token === typescript.SyntaxKind.ExtendsKeyword,
   );
+}
+
+function mergeContractSets(
+  primary: InterfaceContracts,
+  secondary: BaseClassContracts,
+): InterfaceContracts {
+  const merged: InterfaceContracts = {
+    methods: new Map(primary.methods),
+    invariants: primary.invariants,
+  };
+  secondary.methods.forEach((contracts, methodName) => {
+    const existing = merged.methods.get(methodName);
+    if (existing === undefined) {
+      merged.methods.set(methodName, contracts);
+    } else {
+      const mergedPrev = existing.prevExpression ?? contracts.prevExpression;
+      const mergedMethod: InterfaceMethodContracts = {
+        preTags: [...existing.preTags, ...contracts.preTags],
+        postTags: [...existing.postTags, ...contracts.postTags],
+        sourceInterface: existing.sourceInterface,
+      };
+      if (mergedPrev !== undefined) {
+        mergedMethod.prevExpression = mergedPrev;
+      }
+      merged.methods.set(methodName, mergedMethod);
+    }
+  });
+  return merged;
 }
 
 function emitMethodMergeWarnings(
@@ -285,24 +320,43 @@ function rewriteMember(
   return { element: member, changed: false };
 }
 
+function getBaseClassName(node: typescript.ClassDeclaration): string {
+  const extendsClause = node.heritageClauses?.find(
+    (clause) => clause.token === typescript.SyntaxKind.ExtendsKeyword,
+  );
+  const expr = extendsClause?.types[0]?.expression;
+  return expr !== undefined && typescript.isIdentifier(expr) ? expr.text : 'base class';
+}
+
 function resolveEffectiveInvariants(
   node: typescript.ClassDeclaration,
   reparsedClass: typescript.ClassDeclaration | typescript.Node,
   className: string,
   warn: (msg: string) => void,
   interfaceInvariants: string[],
+  baseClassInvariants: string[] = [],
+  baseClassName: string = 'base class',
 ): string[] {
   const classRaw = extractInvariantExpressions(reparsedClass);
-
-  if (interfaceInvariants.length > 0 && classRaw.length > 0) {
+  const sources: string[] = [];
+  if (interfaceInvariants.length > 0) {
+    sources.push('interface');
+  }
+  if (baseClassInvariants.length > 0) {
+    sources.push(baseClassName);
+  }
+  if (classRaw.length > 0) {
+    sources.push(className);
+  }
+  if (sources.length > 1) {
     warn(
       `[axiom] Contract merge warning in ${className}:`
-      + '\n  both interface and class define @invariant tags'
+      + `\n  ${sources.join(', ')} all define @invariant tags`
       + ' — additive merge applied',
     );
   }
 
-  const allRaw = [...interfaceInvariants, ...classRaw];
+  const allRaw = [...interfaceInvariants, ...baseClassInvariants, ...classRaw];
   const valid = filterValidInvariants(allRaw, className, warn);
 
   if (valid.length > 0 && hasClashingMember(node)) {
@@ -359,19 +413,24 @@ function resolveClassContracts(
   className: string,
 ): { interfaceContracts: InterfaceContracts; effectiveInvariants: string[] } {
   const { warn, checker } = ctx;
-  if (checker === undefined && hasImplementsClauses(node)) {
+  if (checker === undefined && hasResolvableHeritageClauses(node)) {
     warn(
       `[axiom] Interface contract resolution skipped in ${node.getSourceFile().fileName}:`
       + '\n  no TypeChecker available (transpileModule mode)'
       + ' — class-level contracts unaffected',
     );
   }
-  const interfaceContracts: InterfaceContracts = checker !== undefined
+  const ifaceOnly: InterfaceContracts = checker !== undefined
     ? resolveInterfaceContracts(node, checker, ctx.reparsedCache, warn, ctx.paramMismatch)
     : { methods: new Map(), invariants: [] };
+  const baseContracts: BaseClassContracts = checker !== undefined
+    ? resolveBaseClassContracts(node, checker, ctx.reparsedCache, warn, ctx.paramMismatch)
+    : { methods: new Map(), invariants: [] };
+  const interfaceContracts = mergeContractSets(ifaceOnly, baseContracts);
   const reparsedClass = ctx.reparsedIndex.classes.get(node.pos) ?? node;
   const effectiveInvariants = resolveEffectiveInvariants(
-    node, reparsedClass, className, warn, interfaceContracts.invariants,
+    node, reparsedClass, className, warn,
+    ifaceOnly.invariants, baseContracts.invariants, getBaseClassName(node),
   );
   return { interfaceContracts, effectiveInvariants };
 }

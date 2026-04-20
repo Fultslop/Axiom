@@ -470,3 +470,246 @@ describe('interface contracts — @pre fires at runtime', () => {
     expect(() => acct.withdraw(50)).not.toThrow();
   });
 });
+
+describe('class inheritance contracts', () => {
+  function compileWithInheritance(
+    baseSource: string,
+    subclassSource: string,
+  ): string {
+    const baseFile = 'base.ts';
+    const subclassFile = 'subclass.ts';
+    const files: Record<string, string> = {
+      [baseFile]: baseSource,
+      [subclassFile]: subclassSource,
+    };
+    const compilerOptions: typescript.CompilerOptions = {
+      target: typescript.ScriptTarget.ES2022,
+      module: typescript.ModuleKind.CommonJS,
+      skipLibCheck: true,
+    };
+    const defaultHost = typescript.createCompilerHost(compilerOptions);
+    const fileMap = new Map(Object.entries(files));
+
+    function resolveFileName(name: string): string | undefined {
+      const base = name.split(/[\\/]/).pop() ?? name;
+      if (fileMap.has(base)) return base;
+      if (fileMap.has(name)) return name;
+      return undefined;
+    }
+
+    const host: typescript.CompilerHost = {
+      ...defaultHost,
+      getSourceFile(name, version) {
+        const resolved = resolveFileName(name);
+        if (resolved !== undefined) {
+          const content = files[resolved]!;
+          return typescript.createSourceFile(name, content, version, true);
+        }
+        return defaultHost.getSourceFile(name, version);
+      },
+      fileExists(name) {
+        return resolveFileName(name) !== undefined || defaultHost.fileExists(name);
+      },
+      readFile(name) {
+        const resolved = resolveFileName(name);
+        if (resolved !== undefined) return files[resolved];
+        return defaultHost.readFile(name);
+      },
+    };
+    const program = typescript.createProgram(
+      [baseFile, subclassFile], compilerOptions, host,
+    );
+    const sourceFile = program.getSourceFile(subclassFile)!;
+    let output = '';
+    program.emit(
+      sourceFile,
+      (_, text) => { output = text; },
+      undefined,
+      false,
+      { before: [createTransformer(program)] },
+    );
+    return output;
+  }
+
+  function compileBase(source: string): string {
+    return typescript.transpileModule(source, {
+      compilerOptions: {
+        target: typescript.ScriptTarget.ES2022,
+        module: typescript.ModuleKind.CommonJS,
+        skipLibCheck: true,
+      },
+    }).outputText;
+  }
+
+  function evalClass(subclassJs: string, className: string, baseSource: string): unknown {
+    // Compile and eval the base class so `Dog extends base_1.Animal` resolves.
+    const baseExports: Record<string, unknown> = {};
+    const baseMod = { exports: baseExports };
+    // eslint-disable-next-line no-new-func
+    new Function('exports', 'module', compileBase(baseSource))(baseExports, baseMod);
+
+    const axiomPkg = { ContractViolationError, InvariantViolationError };
+    function mockRequire(pkg: string): unknown {
+      if (pkg === '@fultslop/axiom') return axiomPkg;
+      if (pkg === './base') return baseExports;
+      throw new Error(`mockRequire: unmapped require("${pkg}")`);
+    }
+
+    const subExports: Record<string, unknown> = {};
+    const subMod = { exports: subExports };
+    // eslint-disable-next-line no-new-func
+    new Function('exports', 'module', 'require', subclassJs)(subExports, subMod, mockRequire);
+    return subMod.exports[className];
+  }
+
+  it('Dog.feed throws when @pre from Animal is violated', () => {
+    const baseSource = `
+      export class Animal {
+        energy = 0;
+        /** @pre amount > 0 */
+        feed(amount: number): void { this.energy += amount; }
+      }
+    `;
+    const subclassSource = `
+      import { Animal } from './base';
+      export class Dog extends Animal {
+        feed(amount: number): void { this.energy += amount; }
+      }
+    `;
+    const js = compileWithInheritance(baseSource, subclassSource);
+    const DogClass = evalClass(js, 'Dog', baseSource) as new () => { feed: (n: number) => void };
+    const dog = new DogClass();
+    expect(() => dog.feed(-1)).toThrow(ContractViolationError);
+    expect(() => dog.feed(5)).not.toThrow();
+  });
+
+  it('Dog.feed throws when @post from Animal is violated', () => {
+    const baseSource = `
+      export class Animal {
+        energy = 0;
+        /** @post this.energy > 0 */
+        feed(amount: number): void { this.energy += amount; }
+      }
+    `;
+    const subclassSource = `
+      import { Animal } from './base';
+      export class Dog extends Animal {
+        feed(amount: number): void { this.energy = -1; }
+      }
+    `;
+    const js = compileWithInheritance(baseSource, subclassSource);
+    const DogClass = evalClass(js, 'Dog', baseSource) as new () => { feed: (n: number) => void };
+    const dog = new DogClass();
+    expect(() => dog.feed(5)).toThrow(ContractViolationError);
+  });
+
+  it('Dog inherits @invariant from Animal — InvariantViolationError thrown', () => {
+    const baseSource = `
+      /** @invariant this.energy >= 0 */
+      export class Animal {
+        energy = 0;
+        feed(amount: number): void { this.energy += amount; }
+      }
+    `;
+    const subclassSource = `
+      import { Animal } from './base';
+      export class Dog extends Animal {
+        feed(amount: number): void { this.energy = -99; }
+      }
+    `;
+    const js = compileWithInheritance(baseSource, subclassSource);
+    const DogClass = evalClass(js, 'Dog', baseSource) as new () => { feed: (n: number) => void };
+    const dog = new DogClass();
+    expect(() => dog.feed(5)).toThrow(InvariantViolationError);
+  });
+
+  it('additive merge: both Animal.feed and Dog.feed @pre guards fire', () => {
+    const baseSource = `
+      export class Animal {
+        energy = 0;
+        /** @pre amount > 0 */
+        feed(amount: number): void { this.energy += amount; }
+      }
+    `;
+    const subclassSource = `
+      import { Animal } from './base';
+      export class Dog extends Animal {
+        energy = 0;
+        /** @pre amount < 1000 */
+        feed(amount: number): void { this.energy += amount; }
+      }
+    `;
+    const js = compileWithInheritance(baseSource, subclassSource);
+    const DogClass = evalClass(js, 'Dog', baseSource) as new () => { feed: (n: number) => void };
+    const dog = new DogClass();
+    expect(() => dog.feed(-1)).toThrow(ContractViolationError);
+    expect(() => dog.feed(2000)).toThrow(ContractViolationError);
+    expect(() => dog.feed(5)).not.toThrow();
+  });
+
+  it('cross-file base class: both @pre and @post resolve from separate .ts file', () => {
+    const baseSource = `
+      export class Animal {
+        energy = 0;
+        /** @pre amount > 0 */
+        /** @post this.energy > 0 */
+        feed(amount: number): void { this.energy += amount; }
+      }
+    `;
+    const subclassSource = `
+      import { Animal } from './base';
+      export class Dog extends Animal {
+        feed(amount: number): void { this.energy = -1; }
+      }
+    `;
+    const js = compileWithInheritance(baseSource, subclassSource);
+    const DogClass = evalClass(js, 'Dog', baseSource) as new () => { feed: (n: number) => void };
+    const dog = new DogClass();
+    expect(() => dog.feed(-1)).toThrow(ContractViolationError); // violates @pre
+    expect(() => dog.feed(5)).toThrow(ContractViolationError);  // violates @post
+  });
+
+  it('no double-injection: subclass not overriding a method is not affected', () => {
+    const baseSource = `
+      export class Animal {
+        energy = 0;
+        /** @pre amount > 0 */
+        run(amount: number): void { this.energy += amount; }
+      }
+    `;
+    const subclassSource = `
+      import { Animal } from './base';
+      export class Dog extends Animal {
+        bark(): void { }
+      }
+    `;
+    const js = compileWithInheritance(baseSource, subclassSource);
+    const DogClass = evalClass(js, 'Dog', baseSource) as new () => { bark: () => void };
+    const dog = new DogClass();
+    // bark() has no contracts anywhere — verifies the transformer left it alone
+    expect(() => dog.bark()).not.toThrow();
+  });
+
+  it('parameter rename: base uses "amount", subclass uses "qty"', () => {
+    const baseSource = `
+      export class Animal {
+        energy = 0;
+        /** @pre amount > 0 */
+        feed(amount: number): void { this.energy += amount; }
+      }
+    `;
+    const subclassSource = `
+      import { Animal } from './base';
+      export class Dog extends Animal {
+        energy = 0;
+        /** @pre qty > 0 */
+        feed(qty: number): void { this.energy += qty; }
+      }
+    `;
+    const js = compileWithInheritance(baseSource, subclassSource);
+    const DogClass = evalClass(js, 'Dog', baseSource) as new () => { feed: (n: number) => void };
+    const dog = new DogClass();
+    expect(() => dog.feed(-1)).toThrow(ContractViolationError);
+    expect(() => dog.feed(5)).not.toThrow();
+  });
+});
