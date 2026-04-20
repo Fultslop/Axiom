@@ -380,7 +380,10 @@ function transformSourceFile(
 
 export type TransformerOptions = {
   warn?: (msg: string) => void;
-  /** Controls how parameter name mismatches are handled for both interface and base-class contracts. */
+  /**
+   * Controls how parameter name mismatches are handled for both interface 
+   * and base-class contracts. 
+   */
   paramMismatch?: 'rename' | 'ignore';
   /** @deprecated Use `paramMismatch` instead. */
   interfaceParamMismatch?: 'rename' | 'ignore';
