@@ -157,6 +157,33 @@ export function reifyExpression(
   throw new Error(`Unsupported expression node kind: ${typescript.SyntaxKind[node.kind]}`);
 }
 
+/**
+ * Walks an expression AST and returns a human-readable description of the
+ * first node kind that reifyExpression cannot handle, or undefined if the
+ * expression is fully reifiable.
+ */
+export function findUnsupportedExpressionNode(
+  node: typescript.Expression,
+): string | undefined {
+  if (typescript.isArrayLiteralExpression(node)) {
+    return 'array literal — use a property check such as result.length === N instead';
+  }
+  if (typescript.isArrowFunction(node) || typescript.isFunctionExpression(node)) {
+    return 'function expression — contract expressions must be pure predicates, not callbacks';
+  }
+  if (typescript.isVoidExpression(node)) {
+    return 'void expression — contract expressions must be pure predicates';
+  }
+  // Recursively check children for the expression node kinds reifyExpression handles
+  let found: string | undefined;
+  node.forEachChild((child) => {
+    if (found === undefined && typescript.isExpression(child)) {
+      found = findUnsupportedExpressionNode(child);
+    }
+  });
+  return found;
+}
+
 function reifyForInitializer(
   factory: typescript.NodeFactory,
   node: typescript.ForInitializer,
@@ -251,6 +278,48 @@ function reifyCaseClause(
   return factory.createDefaultClause(stmts);
 }
 
+function reifyTryStatement(
+  factory: typescript.NodeFactory,
+  node: typescript.TryStatement,
+): typescript.TryStatement {
+  const reifiedTryBlock = factory.createBlock(
+    Array.from(node.tryBlock.statements).map((stmt) => reifyStatement(factory, stmt)),
+    true,
+  );
+  const reifiedCatchClause = node.catchClause !== undefined
+    ? factory.createCatchClause(
+        node.catchClause.variableDeclaration !== undefined
+          ? factory.createVariableDeclaration(
+              typescript.isIdentifier(node.catchClause.variableDeclaration.name)
+                ? factory.createIdentifier(
+                    node.catchClause.variableDeclaration.name.text,
+                  )
+                : node.catchClause.variableDeclaration.name,
+            )
+          : undefined,
+        factory.createBlock(
+          Array.from(node.catchClause.block.statements).map(
+            (stmt) => reifyStatement(factory, stmt),
+          ),
+          true,
+        ),
+      )
+    : undefined;
+  const reifiedFinallyBlock = node.finallyBlock !== undefined
+    ? factory.createBlock(
+        Array.from(node.finallyBlock.statements).map(
+          (stmt) => reifyStatement(factory, stmt),
+        ),
+        true,
+      )
+    : undefined;
+  return factory.createTryStatement(
+    reifiedTryBlock,
+    reifiedCatchClause,
+    reifiedFinallyBlock,
+  );
+}
+
 /* eslint-enable @typescript-eslint/no-use-before-define */
 
 function reifyJumpStatement(
@@ -327,6 +396,10 @@ export function reifyStatement(
   const loopResult = reifyLoopStatement(factory, node);
   if (loopResult !== undefined) {
     return loopResult;
+  }
+
+  if (typescript.isTryStatement(node)) {
+    return reifyTryStatement(factory, node);
   }
 
   throw new Error(`Unsupported statement node kind: ${typescript.SyntaxKind[node.kind]}`);

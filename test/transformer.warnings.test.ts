@@ -1,4 +1,4 @@
-import { transform, transpileWithWarn, transformWithProgram } from './helpers';
+import { transform, transpileWithWarn, transformWithProgram, evalTransformedWith } from './helpers';
 
 describe('transformer — warnings', () => {
   it('skips @pre tag with assignment operator and emits a warning', () => {
@@ -176,5 +176,60 @@ describe('transformer — warnings', () => {
     const output = transformWithProgram(source, (msg) => warns.push(msg));
     expect(warns.length).toBeGreaterThan(0);
     expect(output).not.toContain('result === undefined');
+  });
+
+  describe('array literal in @post expression — targeted warning, other contracts preserved', () => {
+    it('drops only the @post tag and keeps @pre', () => {
+      const source = `
+        /**
+         * @pre items.length > 0
+         * @post result === [1, 2, 3]
+         */
+        export function getItems(items: number[]): number[] {
+          return items;
+        }
+      `;
+      const warnings: string[] = [];
+      const js = transform(source, (msg) => warnings.push(msg));
+      expect(warnings.some((w) => w.includes('Internal error'))).toBe(false);
+      expect(warnings.some((w) => w.includes('array literal') || w.includes('ArrayLiteralExpression'))).toBe(true);
+      const fn = evalTransformedWith(js, 'getItems') as (items: number[]) => number[];
+      expect(() => fn([])).toThrow('PRE');
+      expect(fn([1])).toEqual([1]);
+    });
+  });
+
+  describe('arrow function in @post expression — targeted warning, other contracts preserved', () => {
+    it('drops only the offending @post tag and keeps @pre', () => {
+      const source = `
+        /**
+         * @pre items.length > 0
+         * @post result === items.map(x => x * 2)
+         */
+        export function doubled(items: number[]): number[] {
+          return items.map(x => x * 2);
+        }
+      `;
+      const warnings: string[] = [];
+      const js = transform(source, (msg) => warnings.push(msg));
+      expect(warnings.some((w) => w.includes('Internal error'))).toBe(false);
+      expect(warnings.some((w) => w.includes('arrow') || w.includes('ArrowFunction') || w.includes('function expression'))).toBe(true);
+      const fn = evalTransformedWith(js, 'doubled') as (items: number[]) => number[];
+      expect(() => fn([])).toThrow('PRE');
+      expect(fn([2])).toEqual([4]);
+    });
+  });
+
+  describe('void expression in @pre — targeted warning', () => {
+    it('drops the tag with a targeted warning', () => {
+      const source = `
+        /** @pre void 0 */
+        export function noop(x: number): void {}
+      `;
+      const warnings: string[] = [];
+      transform(source, (msg) => warnings.push(msg));
+      expect(warnings.some((w) => w.includes('Internal error'))).toBe(false);
+      expect(warnings.length).toBeGreaterThan(0);
+    });
   });
 });
