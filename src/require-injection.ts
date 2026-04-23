@@ -8,7 +8,7 @@ const IMPORTED_NAMES = [
   'deepSnapshot',
 ];
 
-function isEsmModuleKind(moduleKind: typescript.ModuleKind | undefined): boolean {
+export function isEsmModuleKind(moduleKind: typescript.ModuleKind | undefined): boolean {
   if (moduleKind === undefined) {
     return false;
   }

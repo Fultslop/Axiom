@@ -1,5 +1,7 @@
 # ESM Exports Prefix — Part 3: Function Rewriter & Integration Tests Implementation Plan
 
+Status: complete
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Thread `ctx.isEsm` through `buildGuardedStatements` in `function-rewriter.ts` so the guard builders receive the ESM flag at runtime, and add end-to-end integration tests that verify CJS still emits `exports.` while ESM targets emit bare identifiers.

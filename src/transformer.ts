@@ -5,7 +5,7 @@ import {
 } from './function-rewriter';
 import { type KeepContracts, shouldEmitPre, shouldEmitPost } from './keep-contracts';
 import { tryRewriteClass } from './class-rewriter';
-import { buildRequireStatement } from './require-injection';
+import { buildRequireStatement, isEsmModuleKind } from './require-injection';
 import type { ParamMismatchMode } from './interface-resolver';
 import type { TransformerContext } from './transformer-context';
 import {
@@ -349,6 +349,20 @@ function resolveKeepContracts(
 // Per-file transformation
 // ---------------------------------------------------------------------------
 
+function resolveFileIsEsm(
+  sourceFile: typescript.SourceFile,
+  baseIsEsm: boolean,
+  moduleKind: typescript.ModuleKind | undefined,
+): boolean {
+  if (moduleKind !== typescript.ModuleKind.Node16 
+          && moduleKind !== typescript.ModuleKind.NodeNext) {
+    return baseIsEsm;
+  }
+  // Node16/NodeNext: TypeScript sets impliedNodeFormat per-file based 
+  // on extension and package.json
+  return sourceFile.impliedNodeFormat === typescript.ModuleKind.ESNext;
+}
+
 function transformSourceFile(
   sourceFile: typescript.SourceFile,
   tsContext: typescript.TransformationContext,
@@ -357,6 +371,7 @@ function transformSourceFile(
   const fileDirective = readFileDirective(sourceFile);
   const ctx: TransformerContext = {
     ...baseCtx,
+    isEsm: resolveFileIsEsm(sourceFile, baseCtx.isEsm, tsContext.getCompilerOptions().module),
     keepContracts: fileDirective ?? baseCtx.keepContracts,
     reparsedIndex: buildReparsedIndex(sourceFile),
     transformed: { value: false },
@@ -457,6 +472,8 @@ export default function createTransformer(
   const reparsedCache = new Map<string, typescript.SourceFile>();
 
   return (tsContext: typescript.TransformationContext) => {
+    const { module: moduleKind } = tsContext.getCompilerOptions();
+    const isEsm = isEsmModuleKind(moduleKind);
     const baseCtx: TransformerContext = {
       factory: tsContext.factory,
       warn,
@@ -467,6 +484,7 @@ export default function createTransformer(
       reparsedIndex: { functions: new Map(), classes: new Map() }, // replaced per file
       reparsedCache,
       transformed: { value: false },                               // replaced per file
+      isEsm,
     };
     return (sourceFile: typescript.SourceFile): typescript.SourceFile =>
       transformSourceFile(sourceFile, tsContext, baseCtx);

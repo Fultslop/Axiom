@@ -17,7 +17,8 @@
       "Bash(npm install *)",
       "Bash(node -e ' *)",
       "Bash(npm publish *)",
-      "Bash(grep '\\\\.md$')"
+      "Bash(grep '\\\\.md$')",
+      "Bash(grep -v '\\\\.md$')"
     ]
   }
 }

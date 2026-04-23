@@ -1,5 +1,7 @@
 # ESM Exports Prefix — Part 1: TransformerContext Implementation Plan
 
+Status: complete
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add `isEsm: boolean` to `TransformerContext`, computed from `compilerOptions.module` in the transformer factory, so later tasks can read `ctx.isEsm` to skip the `exports.` prefix in ESM mode.

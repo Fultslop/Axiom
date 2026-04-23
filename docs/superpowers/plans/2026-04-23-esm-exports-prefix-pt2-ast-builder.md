@@ -1,4 +1,6 @@
-# ESM Exports Prefix — Part 2: AST Builder Implementation Plan
+# Plan: ESM Exports Prefix — Part 2: AST Builder Implementation Plan
+
+Status: complete
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

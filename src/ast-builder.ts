@@ -29,6 +29,7 @@ function substituteContractIdentifiers(
   factory: typescript.NodeFactory,
   node: typescript.Expression,
   exportedNames: Set<string> = new Set(),
+  isEsm: boolean = false,
 ): typescript.Expression {
   const visitor = (child: typescript.Node): typescript.Node => {
     if (typescript.isIdentifier(child)) {
@@ -38,7 +39,7 @@ function substituteContractIdentifiers(
       if (child.text === IDENTIFIER_PREV) {
         return factory.createIdentifier(AXIOM_PREV_VAR);
       }
-      if (exportedNames.has(child.text)) {
+      if (!isEsm && exportedNames.has(child.text)) {
         return factory.createPropertyAccessExpression(
           factory.createIdentifier('exports'),
           factory.createIdentifier(child.text),
@@ -75,6 +76,7 @@ function buildGuardIf(
   body: typescript.ThrowStatement,
   substituteIdentifiers = false,
   exportedNames: Set<string> = new Set(),
+  isEsm: boolean = false,
 ): typescript.IfStatement {
   const tempSourceFile = typescript.createSourceFile(
     'expr.ts',
@@ -92,7 +94,7 @@ function buildGuardIf(
   let expressionToReify = parsedCondition.expression;
   if (substituteIdentifiers || exportedNames.size > 0) {
     expressionToReify = substituteContractIdentifiers(
-      factory, parsedCondition.expression, exportedNames,
+      factory, parsedCondition.expression, exportedNames, isEsm,
     );
   }
   const synthesizedCondition = reifyExpression(factory, expressionToReify);
@@ -105,6 +107,7 @@ export function buildPreCheck(
   location: string,
   factory: typescript.NodeFactory = typescript.factory,
   exportedNames: Set<string> = new Set(),
+  isEsm: boolean = false,
 ): typescript.IfStatement {
   return buildGuardIf(
     factory,
@@ -112,6 +115,7 @@ export function buildPreCheck(
     buildThrowContractViolation(factory, PRE_CONTRACT, expression, location),
     false,
     exportedNames,
+    isEsm,
   );
 }
 
@@ -120,6 +124,7 @@ export function buildPostCheck(
   location: string,
   factory: typescript.NodeFactory = typescript.factory,
   exportedNames: Set<string> = new Set(),
+  isEsm: boolean = false,
 ): typescript.IfStatement {
   return buildGuardIf(
     factory,
@@ -127,6 +132,7 @@ export function buildPostCheck(
     buildThrowContractViolation(factory, POST_CONTRACT, expression, location),
     true,
     exportedNames,
+    isEsm,
   );
 }
 

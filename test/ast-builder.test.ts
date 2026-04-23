@@ -53,6 +53,41 @@ describe('buildPostCheck', () => {
   });
 });
 
+describe('buildPreCheck — ESM exported name handling', () => {
+  it('uses exports. prefix for exported name in CJS mode (isEsm=false)', () => {
+    const exportedNames = new Set(['MAX_LIMIT']);
+    const node = buildPreCheck('x < MAX_LIMIT', 'cap', typescript.factory, exportedNames, false);
+    const output = printNode(node);
+    expect(output).toContain('exports.MAX_LIMIT');
+    expect(output).toContain('!(x < exports.MAX_LIMIT)');
+  });
+
+  it('uses bare identifier for exported name in ESM mode (isEsm=true)', () => {
+    const exportedNames = new Set(['MAX_LIMIT']);
+    const node = buildPreCheck('x < MAX_LIMIT', 'cap', typescript.factory, exportedNames, true);
+    const output = printNode(node);
+    expect(output).not.toContain('exports.MAX_LIMIT');
+    expect(output).toContain('!(x < MAX_LIMIT)');
+  });
+});
+
+describe('buildPostCheck — ESM exported name handling', () => {
+  it('uses exports. prefix for exported name in CJS mode (isEsm=false)', () => {
+    const exportedNames = new Set(['MAX']);
+    const node = buildPostCheck('result <= MAX', 'clamp', typescript.factory, exportedNames, false);
+    const output = printNode(node);
+    expect(output).toContain('exports.MAX');
+  });
+
+  it('uses bare identifier for exported name in ESM mode (isEsm=true)', () => {
+    const exportedNames = new Set(['MAX']);
+    const node = buildPostCheck('result <= MAX', 'clamp', typescript.factory, exportedNames, true);
+    const output = printNode(node);
+    expect(output).not.toContain('exports.');
+    expect(output).toContain(`!(${AXIOM_RESULT_VAR} <= MAX)`);
+  });
+});
+
 describe('buildBodyCapture', () => {
   it('wraps original statements in an IIFE assigned to const __axiom_result__', () => {
     const originalBody = parseStatement('{ x = 1; return x; }') as typescript.Block;
