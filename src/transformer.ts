@@ -5,7 +5,7 @@ import {
 } from './function-rewriter';
 import { type KeepContracts, shouldEmitPre, shouldEmitPost } from './keep-contracts';
 import { tryRewriteClass } from './class-rewriter';
-import { buildRequireStatement } from './require-injection';
+import { buildRequireStatement, isEsmModuleKind } from './require-injection';
 import type { ParamMismatchMode } from './interface-resolver';
 import type { TransformerContext } from './transformer-context';
 import {
@@ -16,6 +16,8 @@ import {
 import { isExportedVariableInitialiser, nodeSourceLocation } from './node-helpers';
 import { isNestedSupportedForm, isIIFEPattern, isIIFESupportedForm } from './tag-pipeline';
 
+const CONTRACT_KIND_PRE = 'pre' as const;
+const CONTRACT_KIND_POST = 'post' as const;
 const MODE_IGNORE = 'ignore' as const;
 const DIRECTIVE_PREFIX = '// @axiom keepContracts' as const;
 const DIRECTIVE_ALL = 'all' as const;
@@ -113,8 +115,6 @@ function emitUnsupportedFunctionWarning(
   );
 }
 
-const CONTRACT_KIND_PRE = 'pre' as const;
-const CONTRACT_KIND_POST = 'post' as const;
 
 function resolveTagsForDropCheck(
   node: typescript.Node,
@@ -349,6 +349,20 @@ function resolveKeepContracts(
 // Per-file transformation
 // ---------------------------------------------------------------------------
 
+function resolveFileIsEsm(
+  sourceFile: typescript.SourceFile,
+  baseIsEsm: boolean,
+  moduleKind: typescript.ModuleKind | undefined,
+): boolean {
+  if (moduleKind !== typescript.ModuleKind.Node16 
+          && moduleKind !== typescript.ModuleKind.NodeNext) {
+    return baseIsEsm;
+  }
+  // Node16/NodeNext: TypeScript sets impliedNodeFormat per-file based 
+  // on extension and package.json
+  return sourceFile.impliedNodeFormat === typescript.ModuleKind.ESNext;
+}
+
 function transformSourceFile(
   sourceFile: typescript.SourceFile,
   tsContext: typescript.TransformationContext,
@@ -357,6 +371,7 @@ function transformSourceFile(
   const fileDirective = readFileDirective(sourceFile);
   const ctx: TransformerContext = {
     ...baseCtx,
+    isEsm: resolveFileIsEsm(sourceFile, baseCtx.isEsm, tsContext.getCompilerOptions().module),
     keepContracts: fileDirective ?? baseCtx.keepContracts,
     reparsedIndex: buildReparsedIndex(sourceFile),
     transformed: { value: false },
@@ -378,16 +393,38 @@ function transformSourceFile(
 // Transformer entry point
 // ---------------------------------------------------------------------------
 
+/**
+ * Configures the transformer so consumers can adapt it to their build environment
+ * without forking or subclassing.
+ *
+ * The defaults are chosen for production builds (contracts stripped, warnings to
+ * stderr, strict parameter matching), so most options only need to be set in test
+ * or dev configurations.
+ */
 export type TransformerOptions = {
+  /**
+   * Receives diagnostic messages instead of writing to `process.stderr`, so test
+   * suites and build tooling can capture or silence output.
+   */
   warn?: (msg: string) => void;
   /**
-   * Controls how parameter name mismatches are handled for both interface 
-   * and base-class contracts. 
+   * Controls how parameter name mismatches are handled for both interface
+   * and base-class contracts.
    */
   paramMismatch?: 'rename' | 'ignore';
   /** @deprecated Use `paramMismatch` instead. */
   interfaceParamMismatch?: 'rename' | 'ignore';
+  /**
+   * Allows contract expressions to reference names that would otherwise be
+   * rejected by the identifier allowlist, enabling use of project-specific
+   * globals or test helpers inside assertions.
+   */
   allowIdentifiers?: string[];
+  /**
+   * Keeps contract assertions in the emitted output rather than stripping them,
+   * so runtime checks remain active in test or debug builds without maintaining
+   * a separate source tree.
+   */
   keepContracts?: boolean | 'pre' | 'post' | 'invariant' | 'all';
 };
 
@@ -411,8 +448,20 @@ function resolveTransformerOptions(
   return { warn, paramMismatch, allowIdentifiers, keepContracts };
 }
 
-// ts-patch plugin entry point. program is optional so the transformer can
-// also be used in transpileModule() for unit testing.
+
+/**
+ * Entry point for ts-patch and the TypeScript compiler API.
+ *
+ * The TypeScript compiler cannot inject runtime checks on its own — it only
+ * type-checks and emits. This factory plugs into the compiler's transformation
+ * pipeline so that every source file is visited before emit, rewriting functions
+ * that carry `@pre`/`@post`/`@invariant` JSDoc tags into executable assertion
+ * wrappers without requiring any changes to the authored source.
+ *
+ * Accepts an optional `Program` so the type checker is available for resolving
+ * interface and base-class contracts across file boundaries; omitting it
+ * degrades gracefully to single-file analysis.
+ */
 export default function createTransformer(
   _program?: typescript.Program,
   options?: TransformerOptions,
@@ -423,6 +472,8 @@ export default function createTransformer(
   const reparsedCache = new Map<string, typescript.SourceFile>();
 
   return (tsContext: typescript.TransformationContext) => {
+    const { module: moduleKind } = tsContext.getCompilerOptions();
+    const isEsm = isEsmModuleKind(moduleKind);
     const baseCtx: TransformerContext = {
       factory: tsContext.factory,
       warn,
@@ -433,15 +484,22 @@ export default function createTransformer(
       reparsedIndex: { functions: new Map(), classes: new Map() }, // replaced per file
       reparsedCache,
       transformed: { value: false },                               // replaced per file
+      isEsm,
     };
     return (sourceFile: typescript.SourceFile): typescript.SourceFile =>
       transformSourceFile(sourceFile, tsContext, baseCtx);
   };
 }
 
-// ts-jest v29+ requires these named exports on AST transformers.
+// ts-jest v29+ discovers custom transformers by these named exports rather than
+// the default export, so they must be present for Jest integration to work.
 export const name = 'axiom-transformer';
 export const version = 1;
+/**
+ * ts-jest's transformer protocol passes arguments in a different order
+ * (`_ts`, `opts`, `program`) than the default export expects, so this shim
+ * bridges the two signatures without duplicating the implementation.
+ */
 export const factory = (
   _ts: typeof typescript,
   opts?: Parameters<typeof createTransformer>[1],

@@ -108,6 +108,7 @@ function buildGuardedStatements(
   exportedNames: Set<string>,
   keepContracts: KeepContracts,
   isAsync: boolean,
+  isEsm: boolean,
 ): typescript.Statement[] {
   const statements: typescript.Statement[] = [];
 
@@ -116,7 +117,7 @@ function buildGuardedStatements(
   const activeInvariant = shouldEmitInvariant(keepContracts) ? invariantCall : null;
 
   for (const tag of activePre) {
-    statements.push(buildPreCheck(tag.expression, location, factory, exportedNames));
+    statements.push(buildPreCheck(tag.expression, location, factory, exportedNames, isEsm));
   }
 
   if (activePost.length > 0 || activeInvariant !== null) {
@@ -125,7 +126,7 @@ function buildGuardedStatements(
     }
     statements.push(buildBodyCapture(originalBody.statements, factory, isAsync));
     for (const tag of activePost) {
-      statements.push(buildPostCheck(tag.expression, location, factory, exportedNames));
+      statements.push(buildPostCheck(tag.expression, location, factory, exportedNames, isEsm));
     }
     if (activeInvariant !== null) {
       statements.push(activeInvariant);
@@ -320,7 +321,7 @@ function rewriteNestedFunctionLike(
   const asyncFlag = isAsyncFunction(innerNode);
   const newStatements = buildGuardedStatements(
     factory, preTags, postTags, originalBody, location,
-    null, prevCapture, exportedNames, keepContracts, asyncFlag,
+    null, prevCapture, exportedNames, keepContracts, asyncFlag, ctx.isEsm,
   );
   return applyNewBody(
     factory, innerNode, factory.createBlock(newStatements, true),
@@ -524,7 +525,7 @@ function rewriteFunction(
 
   const newStatements = buildGuardedStatements(
     factory, preTags, postTags, originalBody, location, invariantCall,
-    prevCapture, exportedNames, keepContracts, asyncFlag,
+    prevCapture, exportedNames, keepContracts, asyncFlag, ctx.isEsm,
   );
   return applyNewBody(factory, node, factory.createBlock(newStatements, true));
 }

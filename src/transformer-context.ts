@@ -13,4 +13,5 @@ export type TransformerContext = {
   reparsedIndex: ReparsedIndex;
   reparsedCache: Map<string, typescript.SourceFile>;
   transformed: { value: boolean };
+  isEsm: boolean;
 };
