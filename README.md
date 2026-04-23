@@ -92,6 +92,25 @@ Run the compiled output with:
 node dist/index.js
 ```
 
+### CJS and ESM output
+
+The transformer adjusts guard expressions automatically based on your module output format — no extra configuration required.
+
+| Module setting | Guard style | Example |
+|---|---|---|
+| `"commonjs"` | `exports.X` | `!(n <= exports.MAX_LIMIT)` |
+| `"esnext"`, `"es2022"`, etc. | bare identifier | `!(n <= MAX_LIMIT)` |
+| `"node16"` / `"nodenext"` | per-file (see below) | — |
+
+Under `"module": "node16"` or `"nodenext"`, TypeScript determines the output format file-by-file:
+
+- `.ts` files → CJS output → guards use `exports.X`
+- `.mts` files → ESM output → guards use bare `X`
+
+The transformer reads TypeScript's `impliedNodeFormat` on each source file, so the correct guard style is applied automatically regardless of the project-level module setting.
+
+> **Important:** You must invoke `tspc` (from `ts-patch`), not plain `tsc`, to run the transformer. Using `tsc` skips all plugins — no guards are emitted.
+
 ## Testing with Jest
 
 > **Required for any contract enforcement in Jest — including interface contracts.**
